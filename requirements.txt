@@ -1,0 +1,7 @@
+numpy
+sounddevice
+requests
+websockets>=13.0
+
+# Optional — local offline mode
+# faster-whisper
