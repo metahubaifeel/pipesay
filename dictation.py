@@ -75,6 +75,19 @@ def render_tokens(final_tokens, non_final_tokens):
     return "".join(parts)
 
 
+def parse_soniox_tokens(session_final_tokens, message_tokens):
+    """Merge one Soniox WS response into accumulated finals + current partials."""
+    non_final = []
+    for token in message_tokens:
+        if not token.get("text"):
+            continue
+        if token.get("is_final"):
+            session_final_tokens.append(token)
+        else:
+            non_final.append(token)
+    return render_tokens(session_final_tokens, non_final)
+
+
 def resample_to_16k(audio, src_rate):
     if src_rate == SONIOX_TARGET_RATE:
         return audio.astype(np.int16, copy=False)
@@ -293,6 +306,22 @@ class SonioxRealtimeSession:
         self._ready = threading.Event()
         self._send_thread = None
         self._recv_thread = None
+        self._aborted = False
+
+    def abort(self):
+        if self._aborted:
+            return
+        self._aborted = True
+        self._running = False
+        try:
+            self.audio_q.put_nowait(None)
+        except queue.Full:
+            pass
+        try:
+            if self._ws:
+                self._ws.close()
+        except Exception:
+            pass
 
     def start(self):
         from websockets.sync.client import connect
@@ -345,7 +374,10 @@ class SonioxRealtimeSession:
         if not self._running:
             return
         self._running = False
-        self.audio_q.put(None)
+        try:
+            self.audio_q.put_nowait(None)
+        except queue.Full:
+            pass
 
     def _send_loop(self):
         try:
@@ -353,42 +385,54 @@ class SonioxRealtimeSession:
                 chunk = self.audio_q.get()
                 if chunk is None:
                     break
+                if self._aborted:
+                    break
                 self._ws.send(chunk.tobytes())
-            self._ws.send("")
-            log("soniox audio stream ended")
+            if not self._aborted:
+                try:
+                    self._ws.send(json.dumps({"type": "finalize"}))
+                except Exception:
+                    pass
+                self._ws.send("")
+                log("soniox audio stream ended")
         except Exception as exc:
-            log(f"soniox send error: {exc}")
-            self.on_error(str(exc))
+            if not self._aborted:
+                log(f"soniox send error: {exc}")
+                self.on_error(str(exc))
 
     def _recv_loop(self):
         try:
             while True:
+                if self._aborted:
+                    break
                 msg = self._ws.recv()
+                if self._aborted:
+                    break
                 res = json.loads(msg)
                 if res.get("error_code"):
                     err = f"{res['error_code']}: {res.get('error_message', '')}"
                     log(f"soniox server error: {err}")
-                    self.on_error(err)
+                    if not self._aborted:
+                        self.on_error(err)
                     break
 
-                non_final = []
-                for token in res.get("tokens", []):
-                    if not token.get("text"):
-                        continue
-                    if token.get("is_final"):
-                        self.final_tokens.append(token)
-                    else:
-                        non_final.append(token)
-
-                text = render_tokens(self.final_tokens, non_final)
-                self.on_text(text, bool(non_final))
+                msg_tokens = res.get("tokens", [])
+                text = parse_soniox_tokens(self.final_tokens, msg_tokens)
+                has_partial = any(
+                    t.get("text") and not t.get("is_final") for t in msg_tokens
+                )
+                if not self._aborted:
+                    self.on_text(text, has_partial, len(text))
 
                 if res.get("finished"):
                     final_text = render_tokens(self.final_tokens, [])
-                    log(f"soniox finished len={len(final_text)}")
-                    self.on_finished(final_text)
+                    log(f"soniox finished len={len(final_text)} finals={len(self.final_tokens)}")
+                    if not self._aborted:
+                        self.on_finished(final_text)
                     break
         except Exception as exc:
+            if self._aborted:
+                return
             final_text = render_tokens(self.final_tokens, [])
             log(f"soniox recv error: {exc}; partial len={len(final_text)}")
             if final_text.strip():
@@ -417,7 +461,6 @@ class DictationApp:
         self.mode = tk.StringVar(value="soniox")
         self.whisper_model = None
         self.soniox_session = None
-        self.live_start_index = "1.0"
         self.record_started_at = 0.0
         self.local_chunks = []
         self.peak_level = 0.0
@@ -428,6 +471,11 @@ class DictationApp:
         self._shutting_down = False
         self._rt_pending = []
         self._level_pending = None
+        self._rt_token = 0
+        self._active_rt_token = 0
+        self._finalizing_rt_token = 0
+        self._session_live_text = ""
+        self._committed_text = ""
 
         self._setup_styles()
         self._build_ui()
@@ -477,6 +525,53 @@ class DictationApp:
             self.root.focus_force()
         except Exception as exc:
             log(f"bring to front failed: {exc}")
+
+    def _ui(self, fn):
+        if threading.current_thread() is threading.main_thread():
+            fn()
+        else:
+            self.root.after(0, fn)
+
+    def _cancel_live_ui(self):
+        pass
+
+    def _sync_committed_from_widget(self):
+        body = self.text_area.get("1.0", "end-1c")
+        if body.startswith("录音时这里会实时") or body.startswith("已定稿的结果"):
+            self._committed_text = ""
+        else:
+            self._committed_text = body
+            if self._committed_text and not self._committed_text.endswith("\n"):
+                self._committed_text += "\n"
+
+    def _show_live_panel(self):
+        if not self.live_frame.winfo_ismapped():
+            self.live_frame.pack(fill="x", pady=(0, 10), before=self.out_head)
+        self._set_live_display("…", partial=False)
+
+    def _hide_live_panel(self):
+        self.live_frame.pack_forget()
+        self._session_live_text = ""
+
+    def _set_live_display(self, text, partial=False):
+        display = text if text else "…"
+        if partial and text:
+            display += " …"
+        self.live_text.configure(state="normal")
+        self.live_text.delete("1.0", "end")
+        self.live_text.insert("1.0", display)
+        self.live_text.configure(state="disabled")
+
+    def _apply_live_text(self, rt_token, text, partial, text_len=0):
+        if rt_token not in (self._active_rt_token, self._finalizing_rt_token):
+            return
+        self._session_live_text = text or ""
+        self._set_live_display(self._session_live_text, partial=partial)
+
+    def _begin_live_region(self):
+        self._sync_committed_from_widget()
+        self._session_live_text = ""
+        self._show_live_panel()
 
     def _toggle_pin(self):
         self.always_on_top = not self.always_on_top
@@ -722,17 +817,44 @@ class DictationApp:
         )
         self.mic_info_label.pack(anchor="w", pady=(0, 8))
 
-        out_head = tk.Frame(shell, bg=BG)
-        out_head.pack(fill="x", pady=(0, 6))
+        self.live_frame = tk.Frame(shell, bg=PANEL, highlightbackground=ACCENT, highlightthickness=1)
+        live_head = tk.Frame(self.live_frame, bg=PANEL)
+        live_head.pack(fill="x", padx=12, pady=(8, 4))
         tk.Label(
-            out_head,
+            live_head,
+            text="实时转写",
+            font=("Segoe UI", 11, "bold"),
+            bg=PANEL,
+            fg=ACCENT,
+        ).pack(side="left")
+        self.live_text = tk.Text(
+            self.live_frame,
+            height=5,
+            font=("Segoe UI", 14),
+            bg=CARD,
+            fg=TEXT,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            wrap="word",
+            padx=12,
+            pady=8,
+        )
+        self.live_text.pack(fill="x", padx=1, pady=(0, 10))
+        self.live_text.insert("1.0", "…")
+        self.live_text.configure(state="disabled")
+
+        self.out_head = tk.Frame(shell, bg=BG)
+        self.out_head.pack(fill="x", pady=(0, 6))
+        tk.Label(
+            self.out_head,
             text="识别结果",
             font=("Segoe UI", 13, "bold"),
             bg=BG,
             fg=TEXT,
         ).pack(side="left")
         self._pill_btn(
-            out_head,
+            self.out_head,
             "复制全部",
             self._copy_all,
             CARD2,
@@ -743,7 +865,7 @@ class DictationApp:
             pady=4,
         ).pack(side="right", padx=(6, 0))
         self._pill_btn(
-            out_head,
+            self.out_head,
             "清空",
             self._clear,
             CARD2,
@@ -770,7 +892,7 @@ class DictationApp:
             pady=12,
         )
         self.text_area.pack(fill="both", expand=True, padx=1, pady=1)
-        self.text_area.insert("1.0", "录音时这里会实时出字，停止后定稿保留\n")
+        self.text_area.insert("1.0", "已定稿的结果会保留在这里\n")
 
         bottom = tk.Frame(shell, bg=BG)
         bottom.pack(fill="x", pady=(10, 0))
@@ -863,12 +985,16 @@ class DictationApp:
             if not self.mic_ok:
                 return
 
+        self._abort_session()
+        self._cancel_live_ui()
+        self._rt_token += 1
+        self._active_rt_token = self._rt_token
+        self._finalizing_rt_token = 0
+        rt_token = self._active_rt_token
+
         self.recording = True
         self.record_started_at = time.time()
-        hint = self.text_area.get("1.0", "end-1c")
-        if hint.startswith("录音时这里会实时"):
-            self.text_area.delete("1.0", "end")
-        self.live_start_index = self.text_area.index("end-1c")
+        self._begin_live_region()
         self.local_chunks = []
         self.peak_level = 0.0
         self.last_raw_audio = None
@@ -878,21 +1004,29 @@ class DictationApp:
 
         self.record_btn.config(text="停止录音", bg=BTN_ON)
         self.status_label.config(text="正在连接… 请对着麦克风说话", fg="#ff6b6b")
-        log(f"record start mode={self.mode.get()} rate={self.capture_rate}")
+        log(f"record start mode={self.mode.get()} rate={self.capture_rate} token={rt_token}")
 
         if self.mode.get() == "soniox":
             self.soniox_session = SonioxRealtimeSession(
                 get_soniox_key(),
-                on_text=self._on_live_text,
-                on_error=self._on_soniox_error,
-                on_finished=self._on_soniox_finished,
+                on_text=lambda t, p, n, tok=rt_token: self._on_live_text(tok, t, p, n),
+                on_error=lambda m, tok=rt_token: self._on_soniox_error(tok, m),
+                on_finished=lambda t, tok=rt_token: self._on_soniox_finished(tok, t),
                 on_ready=self._on_rt_ready,
             )
-            threading.Thread(target=self._connect_rt, daemon=True).start()
+            threading.Thread(
+                target=self._connect_rt, args=(rt_token,), daemon=True
+            ).start()
 
-    def _connect_rt(self):
+    def _connect_rt(self, rt_token):
+        session = self.soniox_session
+        if not session or rt_token != self._active_rt_token:
+            return
         try:
-            self.soniox_session.start()
+            session.start()
+            if rt_token != self._active_rt_token:
+                session.abort()
+                return
             self.root.after(
                 0,
                 lambda: self.status_label.config(
@@ -901,17 +1035,21 @@ class DictationApp:
             )
         except Exception as exc:
             log(f"soniox connect failed: {exc}")
-            self.root.after(0, lambda: self._on_rt_connect_failed(str(exc)))
+            self.root.after(0, lambda: self._on_rt_connect_failed(str(exc), rt_token))
 
-    def _on_rt_connect_failed(self, msg):
+    def _on_rt_connect_failed(self, msg, rt_token):
+        if rt_token != self._active_rt_token:
+            return
         self.recording = False
         self.record_btn.config(text="开始录音", bg=BTN_BG)
         self.status_label.config(text=f"连接失败: {msg}", fg="#ff6b6b")
+        if self.soniox_session:
+            self.soniox_session.abort()
         self.soniox_session = None
 
     def _on_rt_ready(self):
         session = self.soniox_session
-        if not session:
+        if not session or session._aborted:
             return
         for chunk in self._rt_pending:
             session.push_audio(chunk)
@@ -945,7 +1083,8 @@ class DictationApp:
 
         if self.mode.get() == "soniox":
             if self.soniox_session:
-                self.status_label.config(text="正在识别...", fg=ORANGE)
+                self._finalizing_rt_token = self._active_rt_token
+                self.status_label.config(text="正在定稿…", fg=ORANGE)
                 self.progress.pack(pady=(6, 0))
                 self.progress.start()
                 self.soniox_session.stop()
@@ -965,55 +1104,78 @@ class DictationApp:
         ).start()
 
     def _abort_session(self):
-        if self.soniox_session:
-            self.soniox_session.stop()
-            self.soniox_session = None
+        session = self.soniox_session
+        if session:
+            session.abort()
+        self.soniox_session = None
+        self._finalizing_rt_token = 0
+        self._hide_live_panel()
 
-    def _on_live_text(self, text, partial):
+    def _on_live_text(self, rt_token, text, partial, text_len=0):
+        self._ui(
+            lambda: self._apply_live_text(rt_token, text, partial, text_len)
+        )
+
+    def _on_soniox_error(self, rt_token, message):
+        if rt_token not in (self._active_rt_token, self._finalizing_rt_token):
+            log(f"ignore stale rt error token={rt_token}: {message}")
+            return
+
         def update():
-            self.text_area.delete(self.live_start_index, "end")
-            if text:
-                suffix = " …" if partial else ""
-                self.text_area.insert("end", text + suffix)
-            self.text_area.see("end")
-
-        self.root.after(0, update)
-
-    def _on_soniox_error(self, message):
-        def update():
+            if rt_token not in (self._active_rt_token, self._finalizing_rt_token):
+                return
             self.progress.stop()
             self.progress.pack_forget()
             self.status_label.config(text=f"识别错误: {message}", fg="#ff6b6b")
-            self._fallback_async("soniox-error")
+            self._fallback_async("soniox-error", rt_token)
 
-        self.root.after(0, update)
+        self._ui(update)
 
-    def _on_soniox_finished(self, text):
+    def _commit_result_text(self, text):
+        if not text.strip():
+            return
+        if self._committed_text.startswith("已定稿的结果") or self._committed_text.startswith(
+            "录音时这里会实时"
+        ):
+            self._committed_text = ""
+        self._committed_text += text.strip() + "\n"
+        self.text_area.delete("1.0", "end")
+        self.text_area.insert("1.0", self._committed_text)
+        self.text_area.see("end")
+
+    def _on_soniox_finished(self, rt_token, text):
+        if rt_token != self._finalizing_rt_token:
+            log(f"ignore stale rt finished token={rt_token}")
+            return
+
         def update():
+            if rt_token != self._finalizing_rt_token:
+                return
             self.progress.stop()
             self.progress.pack_forget()
-            self.text_area.delete(self.live_start_index, "end")
-            if text.strip():
-                self.text_area.insert("end", text.strip() + "\n")
-                self.text_area.see("end")
+            final = (text or self._session_live_text or "").strip()
+            self._hide_live_panel()
+            if final:
+                self._commit_result_text(final)
                 self.soniox_session = None
+                self._finalizing_rt_token = 0
                 if self.auto_copy.get():
                     self.root.clipboard_clear()
-                    self.root.clipboard_append(text.strip())
+                    self.root.clipboard_append(final)
                     self.status_label.config(
-                        text=f"完成 — {len(text.strip())} 字 · 已复制", fg=GREEN
+                        text=f"完成 — {len(final)} 字 · 已复制", fg=GREEN
                     )
                 else:
-                    self.status_label.config(
-                        text=f"完成 — {len(text.strip())} 字", fg=GREEN
-                    )
+                    self.status_label.config(text=f"完成 — {len(final)} 字", fg=GREEN)
             else:
                 self.status_label.config(text="实时识别为空，正在重试...", fg=ORANGE)
-                self._fallback_async("soniox-empty")
+                self._fallback_async("soniox-empty", rt_token)
 
-        self.root.after(0, update)
+        self._ui(update)
 
-    def _fallback_async(self, reason):
+    def _fallback_async(self, reason, rt_token=None):
+        if rt_token is not None and rt_token != self._finalizing_rt_token:
+            return
         if self.last_raw_audio is None:
             self.soniox_session = None
             self.status_label.config(text="没听清，请再试一次", fg=ORANGE)
@@ -1035,10 +1197,10 @@ class DictationApp:
         self.progress.stop()
         self.progress.pack_forget()
         self.soniox_session = None
-        self.text_area.delete(self.live_start_index, "end")
+        self._finalizing_rt_token = 0
+        self._hide_live_panel()
         if text.strip():
-            self.text_area.insert("end", text.strip() + "\n")
-            self.text_area.see("end")
+            self._commit_result_text(text.strip())
             if self.auto_copy.get():
                 self.root.clipboard_clear()
                 self.root.clipboard_append(text.strip())
@@ -1119,6 +1281,8 @@ class DictationApp:
 
     def _clear(self):
         self.text_area.delete("1.0", "end")
+        self._committed_text = ""
+        self._hide_live_panel()
         self.status_label.config(text="已清空", fg=GRAY)
 
     def _save(self):
@@ -1134,6 +1298,96 @@ class DictationApp:
         with open(path, "w") as f:
             f.write(text)
         self.status_label.config(text=f"已保存: {path}", fg=GREEN)
+
+
+def cli_test_rt_e2e():
+    """Stream example audio and verify live transcript grows across updates."""
+    import requests
+    from websockets.sync.client import connect
+
+    key = get_soniox_key()
+    if not key:
+        print("ERROR: no Soniox key")
+        return 1
+
+    mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    r = requests.get("https://soniox.com/media/examples/coffee_shop.mp3", timeout=30)
+    r.raise_for_status()
+    mp3.write(r.content)
+    mp3.close()
+
+    updates = []
+    finished = {"text": "", "err": None}
+
+    def on_text(text, partial, text_len=0):
+        updates.append((len(text), partial))
+        print(f"  live #{len(updates):02d} len={len(text):3d} partial={partial} {text[:70]!r}")
+
+    def on_error(msg):
+        finished["err"] = msg
+
+    def on_finished(text):
+        finished["text"] = text
+
+    config = {
+        "api_key": key,
+        "model": "stt-rt-v4",
+        "language_hints": ["en"],
+        "enable_endpoint_detection": True,
+        "audio_format": "auto",
+    }
+
+    print("E2E RT stream test…")
+    with connect(SONIOX_WS_URL, ping_interval=20, ping_timeout=60) as ws:
+        ws.send(json.dumps(config))
+
+        def stream():
+            with open(mp3.name, "rb") as fh:
+                while chunk := fh.read(3840):
+                    ws.send(chunk)
+                    time.sleep(0.05)
+            ws.send(json.dumps({"type": "finalize"}))
+            ws.send("")
+
+        threading.Thread(target=stream, daemon=True).start()
+
+        final_tokens = []
+        while True:
+            res = json.loads(ws.recv())
+            if res.get("error_code"):
+                print(f"ERROR: {res['error_code']} {res.get('error_message')}")
+                os.unlink(mp3.name)
+                return 1
+            msg_tokens = res.get("tokens", [])
+            text = parse_soniox_tokens(final_tokens, msg_tokens)
+            has_partial = any(
+                t.get("text") and not t.get("is_final") for t in msg_tokens
+            )
+            on_text(text, has_partial, len(text))
+            if res.get("finished"):
+                on_finished(render_tokens(final_tokens, []))
+                break
+
+    os.unlink(mp3.name)
+
+    if finished["err"]:
+        print("ERROR:", finished["err"])
+        return 1
+    if len(updates) < 5:
+        print(f"FAIL: only {len(updates)} live updates (need >=5)")
+        return 1
+    if updates[-1][0] <= updates[0][0]:
+        print(f"FAIL: text did not grow ({updates[0][0]} -> {updates[-1][0]})")
+        return 1
+    if len(finished["text"]) < 20:
+        print(f"FAIL: final too short ({len(finished['text'])})")
+        return 1
+
+    print(
+        f"OK: {len(updates)} live updates, "
+        f"growth {updates[0][0]}->{updates[-1][0]}, final={len(finished['text'])} chars"
+    )
+    return 0
 
 
 def cli_test_soniox():
@@ -1222,6 +1476,8 @@ def main():
     if len(sys.argv) > 1:
         if sys.argv[1] == "--test":
             raise SystemExit(cli_test_soniox())
+        if sys.argv[1] == "--test-rt-e2e":
+            raise SystemExit(cli_test_rt_e2e())
         if sys.argv[1] == "--test-mic":
             sec = float(sys.argv[2]) if len(sys.argv) > 2 else 3
             raise SystemExit(cli_test_mic(sec))
