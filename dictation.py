@@ -27,29 +27,21 @@ LOG_DIR = os.path.expanduser("~/.local/share/coco-dictation")
 LOG_FILE = os.path.join(LOG_DIR, "dictation.log")
 RAISE_SIGNAL = signal.SIGUSR1
 
-BG = "#0a0a0c"
-PANEL = "#131316"
-CARD = "#1a1a1f"
-CARD2 = "#242429"
-CARD_HOVER = "#2c2c33"
-BORDER = "#2e2e36"
-TEXT = "#f5f5f7"
-MUTED = "#8e8e98"
-DIM = "#5c5c66"
-ACCENT = "#7c6cf0"
-ACCENT2 = "#6558d9"
-ACCENT_SOFT = "#2a2640"
-GREEN = "#4ade80"
-ORANGE = "#fbbf24"
-RED = "#f87171"
+BG = "#09090b"
+PANEL = "#141416"
+CARD = "#1c1c1f"
+CARD2 = "#252529"
+BORDER = "#2e2e33"
+TEXT = "#f4f4f5"
+MUTED = "#71717a"
+ACCENT = "#6366f1"
+ACCENT2 = "#4f46e5"
+GREEN = "#22c55e"
+ORANGE = "#f59e0b"
 GRAY = MUTED
-BTN_BG = "#dc4a4a"
+BTN_BG = "#ef4444"
 BTN_ON = "#b91c1c"
-BTN_IDLE_RING = "#3a2226"
-LIVE_BORDER = "#6d5ef7"
 WHITE = TEXT
-FONT = ("Segoe UI", "PingFang SC", "Noto Sans CJK SC", "sans-serif")
-FONT_MONO = ("JetBrains Mono", "Consolas", "monospace")
 
 
 def log(msg):
@@ -458,7 +450,7 @@ class DictationApp:
     def __init__(self, root):
         self.root = root
         root.title("Coco Dictation")
-        root.geometry("520x740")
+        root.geometry("480x680")
         root.configure(bg=BG)
         root.minsize(400, 560)
 
@@ -484,6 +476,7 @@ class DictationApp:
         self._finalizing_rt_token = 0
         self._session_live_text = ""
         self._committed_text = ""
+        self._live_follow = True
 
         self._setup_styles()
         self._build_ui()
@@ -545,7 +538,7 @@ class DictationApp:
 
     def _sync_committed_from_widget(self):
         body = self.text_area.get("1.0", "end-1c")
-        if body.startswith("录音时这里会实时") or body.startswith("已定稿的文字"):
+        if body.startswith("录音时这里会实时") or body.startswith("已定稿的结果"):
             self._committed_text = ""
         else:
             self._committed_text = body
@@ -554,24 +547,35 @@ class DictationApp:
 
     def _show_live_panel(self):
         if not self.live_frame.winfo_ismapped():
-            self.live_frame.pack(fill="x", pady=(0, 12), before=self.out_head)
-        self.live_frame.configure(
-            bg=LIVE_BORDER if self.recording else BORDER,
-        )
+            self.live_frame.pack(fill="x", pady=(0, 10), before=self.out_head)
+        self._live_follow = True
         self._set_live_display("…", partial=False)
 
     def _hide_live_panel(self):
         self.live_frame.pack_forget()
         self._session_live_text = ""
-        self.live_frame.configure(bg=BORDER)
+
+    def _live_at_bottom(self):
+        try:
+            _, y1 = self.live_text.yview()
+            return y1 >= 0.98
+        except tk.TclError:
+            return True
+
+    def _sync_live_follow(self):
+        self._live_follow = self._live_at_bottom()
 
     def _set_live_display(self, text, partial=False):
         display = text if text else "…"
         if partial and text:
             display += " …"
+        at_bottom = self._live_at_bottom()
         self.live_text.configure(state="normal")
         self.live_text.delete("1.0", "end")
         self.live_text.insert("1.0", display)
+        if at_bottom or self._live_follow:
+            self.live_text.see("end")
+            self._live_follow = True
         self.live_text.configure(state="disabled")
 
     def _apply_live_text(self, rt_token, text, partial, text_len=0):
@@ -585,49 +589,13 @@ class DictationApp:
         self._session_live_text = ""
         self._show_live_panel()
 
-    def _set_recording_visual(self, recording):
-        if not hasattr(self, "hero"):
-            return
-        if recording:
-            self.hero.configure(bg=BTN_BG)
-            self.record_btn.configure(
-                text="■  停止并定稿",
-                bg=BTN_ON,
-                activebackground="#991b1b",
-            )
-            self.record_ring.configure(bg=BTN_IDLE_RING)
-            if hasattr(self, "live_dot"):
-                self.live_dot.configure(fg=BTN_BG)
-            if self.live_frame.winfo_ismapped():
-                self.live_frame.configure(bg=LIVE_BORDER)
-        else:
-            self.hero.configure(bg=BORDER)
-            self.record_btn.configure(
-                text="●  开始录音",
-                bg=BTN_BG,
-                activebackground=BTN_ON,
-            )
-            self.record_ring.configure(bg=PANEL)
-            if hasattr(self, "live_dot"):
-                self.live_dot.configure(fg=DIM)
-            self.live_frame.configure(bg=BORDER)
-
-    def _card(self, parent, pad=14, accent=False):
-        border = LIVE_BORDER if accent else BORDER
-        outer = tk.Frame(parent, bg=border)
-        inner = tk.Frame(outer, bg=PANEL)
-        inner.pack(fill="both", expand=True, padx=1, pady=1)
-        body = tk.Frame(inner, bg=PANEL, padx=pad, pady=pad)
-        body.pack(fill="both", expand=True)
-        return outer, body
-
     def _toggle_pin(self):
         self.always_on_top = not self.always_on_top
         self.root.attributes("-topmost", self.always_on_top)
         if self.always_on_top:
             self.pin_btn.config(bg=ACCENT, fg=TEXT, text="已置顶", activebackground=ACCENT2)
         else:
-            self.pin_btn.config(bg=CARD2, fg=MUTED, text="置顶", activebackground=CARD_HOVER)
+            self.pin_btn.config(bg=CARD2, fg=MUTED, text="置顶", activebackground=BORDER)
         log(f"always_on_top={self.always_on_top}")
 
     def _setup_styles(self):
@@ -638,21 +606,20 @@ class DictationApp:
             pass
         style.configure(
             "Level.Horizontal.TProgressbar",
-            troughcolor=CARD2,
+            troughcolor=BORDER,
             background=ACCENT,
             borderwidth=0,
             lightcolor=ACCENT,
-            darkcolor=ACCENT2,
-            thickness=10,
+            darkcolor=ACCENT,
+            thickness=8,
         )
         style.configure(
             "Busy.Horizontal.TProgressbar",
-            troughcolor=CARD2,
+            troughcolor=BORDER,
             background=ORANGE,
             borderwidth=0,
-            thickness=3,
+            thickness=4,
         )
-        style.configure("TCombobox", fieldbackground=CARD)
 
     def _pill_btn(self, parent, text, command, bg, fg=TEXT, active_bg=None, **kw):
         return tk.Button(
@@ -682,14 +649,14 @@ class DictationApp:
         if not self.mic_label:
             self.capture_rate, self.mic_label = 48000, "系统默认"
         self.chunk_samples = self.capture_rate * CHUNK_MS // 1000
-        self.mic_info_label.config(text=f"🎙  {self.mic_label} @ {self.capture_rate}Hz")
+        self.mic_info_label.config(text=f"麦克风 · {self.mic_label} @ {self.capture_rate}Hz")
         self._start_mic_monitor()
 
     def _start_mic_monitor(self):
         prepare_microphone()
         self.capture_rate, self.mic_label = pick_mic_source()[1:]
         self.chunk_samples = self.capture_rate * CHUNK_MS // 1000
-        self.mic_info_label.config(text=f"🎙  {self.mic_label} @ {self.capture_rate}Hz")
+        self.mic_info_label.config(text=f"麦克风 · {self.mic_label} @ {self.capture_rate}Hz")
 
         def callback(indata, frames, time_info, status):
             if self._shutting_down:
@@ -744,54 +711,38 @@ class DictationApp:
         self.level_label.config(text=f"{pct}%")
 
     def _build_ui(self):
-        tk.Frame(self.root, bg=ACCENT, height=3).pack(fill="x", side="top")
-
-        shell = tk.Frame(self.root, bg=BG, padx=22, pady=18)
+        shell = tk.Frame(self.root, bg=BG, padx=20, pady=16)
         shell.pack(fill="both", expand=True)
 
         header = tk.Frame(shell, bg=BG)
-        header.pack(fill="x", pady=(0, 16))
-        title_col = tk.Frame(header, bg=BG)
-        title_col.pack(side="left", fill="x", expand=True)
+        header.pack(fill="x", pady=(0, 14))
         tk.Label(
-            title_col,
+            header,
             text="Coco Dictation",
-            font=(FONT[0], 24, "bold"),
+            font=("Segoe UI", 22, "bold"),
             bg=BG,
             fg=TEXT,
-        ).pack(anchor="w")
-        tk.Label(
-            title_col,
-            text="说话 · 实时出字 · 停止定稿",
-            font=(FONT[0], 11),
-            bg=BG,
-            fg=DIM,
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(side="left")
         self.pin_btn = self._pill_btn(
             header,
             "置顶",
             self._toggle_pin,
             CARD2,
             fg=MUTED,
-            active_bg=CARD_HOVER,
-            font=(FONT[0], 10),
-            padx=16,
-            pady=7,
+            active_bg=BORDER,
+            font=("Segoe UI", 10),
+            padx=14,
+            pady=6,
         )
-        self.pin_btn.pack(side="right", anchor="n")
+        self.pin_btn.pack(side="right")
 
-        self.hero, hero_body = self._card(shell, pad=0)
-        self.hero.pack(fill="x", pady=(0, 14))
+        hero = tk.Frame(shell, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        hero.pack(fill="x", pady=(0, 12))
 
-        record_wrap = tk.Frame(hero_body, bg=PANEL, padx=18, pady=18)
-        record_wrap.pack(fill="x")
-
-        self.record_ring = tk.Frame(record_wrap, bg=PANEL, padx=3, pady=3)
-        self.record_ring.pack(fill="x")
         self.record_btn = tk.Button(
-            self.record_ring,
-            text="●  开始录音",
-            font=(FONT[0], 16, "bold"),
+            hero,
+            text="开始录音",
+            font=("Segoe UI", 17, "bold"),
             bg=BTN_BG,
             fg=TEXT,
             activebackground=BTN_ON,
@@ -799,214 +750,198 @@ class DictationApp:
             relief="flat",
             borderwidth=0,
             cursor="hand2",
-            pady=18,
+            pady=16,
             command=self._toggle_record,
         )
-        self.record_btn.pack(fill="x")
+        self.record_btn.pack(fill="x", padx=16, pady=(16, 8))
 
         self.status_label = tk.Label(
-            record_wrap,
-            text="就绪 — 空格键开始 / 停止",
-            font=(FONT[0], 11),
+            hero,
+            text="就绪 — 空格键可开始/停止",
+            font=("Segoe UI", 11),
             bg=PANEL,
             fg=MUTED,
         )
-        self.status_label.pack(pady=(12, 0))
+        self.status_label.pack(pady=(0, 10))
 
-        meter_card = tk.Frame(hero_body, bg=CARD, padx=14, pady=10)
-        meter_card.pack(fill="x", padx=18, pady=(0, 16))
-        meter = tk.Frame(meter_card, bg=CARD)
-        meter.pack(fill="x")
-        tk.Label(
-            meter, text="MIC", font=(FONT[0], 9, "bold"), bg=CARD, fg=DIM, width=4
-        ).pack(side="left")
+        meter = tk.Frame(hero, bg=PANEL)
+        meter.pack(fill="x", padx=16, pady=(0, 14))
+        tk.Label(meter, text="输入", font=("Segoe UI", 10), bg=PANEL, fg=MUTED, width=4).pack(
+            side="left"
+        )
         self.level_bar = ttk.Progressbar(
             meter, mode="determinate", maximum=100, style="Level.Horizontal.TProgressbar"
         )
-        self.level_bar.pack(side="left", fill="x", expand=True, padx=(10, 10))
+        self.level_bar.pack(side="left", fill="x", expand=True, padx=(8, 8))
         self.level_label = tk.Label(
-            meter,
-            text="0%",
-            font=(FONT[0], 10),
-            bg=CARD,
-            fg=MUTED,
-            width=5,
-            anchor="e",
+            meter, text="0%", font=("Segoe UI", 10), bg=PANEL, fg=MUTED, width=5
         )
         self.level_label.pack(side="right")
 
         opts = tk.Frame(shell, bg=BG)
-        opts.pack(fill="x", pady=(0, 12))
+        opts.pack(fill="x", pady=(0, 10))
         tk.Checkbutton(
             opts,
-            text="识别完自动复制到剪贴板",
+            text="识别完自动复制",
             variable=self.auto_copy,
-            font=(FONT[0], 11),
+            font=("Segoe UI", 11),
             bg=BG,
             fg=MUTED,
             activebackground=BG,
-            activeforeground=TEXT,
-            selectcolor=ACCENT_SOFT,
+            activeforeground=MUTED,
+            selectcolor=CARD,
             highlightthickness=0,
         ).pack(side="left")
-        self.model_label = tk.Label(opts, text="", font=(FONT[0], 10), bg=BG, fg=DIM)
+        self.model_label = tk.Label(opts, text="", font=("Segoe UI", 10), bg=BG, fg=MUTED)
         self.model_label.pack(side="right")
 
-        engine_outer, engine_body = self._card(shell, pad=10)
-        engine_outer.pack(fill="x", pady=(0, 12))
+        mode_frame = tk.Frame(shell, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        mode_frame.pack(fill="x", pady=(0, 10))
+        inner = tk.Frame(mode_frame, bg=PANEL, padx=12, pady=10)
+        inner.pack(fill="x")
         tk.Label(
-            engine_body,
-            text="识别引擎",
-            font=(FONT[0], 10, "bold"),
-            bg=PANEL,
-            fg=DIM,
-        ).pack(side="left", padx=(4, 12))
-        seg = tk.Frame(engine_body, bg=CARD2, padx=3, pady=3)
-        seg.pack(side="left")
+            inner, text="引擎", font=("Segoe UI", 10, "bold"), bg=PANEL, fg=MUTED
+        ).pack(side="left", padx=(0, 10))
         self.soniox_btn = self._pill_btn(
-            seg,
+            inner,
             "Soniox 云端",
             lambda: self._switch_mode("soniox"),
             ACCENT,
-            font=(FONT[0], 10, "bold"),
-            padx=16,
-            pady=7,
+            font=("Segoe UI", 10, "bold"),
+            padx=14,
+            pady=6,
         )
-        self.soniox_btn.pack(side="left", padx=(0, 4))
+        self.soniox_btn.pack(side="left", padx=(0, 6))
         self.local_btn = self._pill_btn(
-            seg,
+            inner,
             "本地 Whisper",
             lambda: self._switch_mode("local"),
             CARD2,
             fg=MUTED,
-            active_bg=CARD_HOVER,
-            padx=16,
-            pady=7,
+            active_bg=BORDER,
+            padx=14,
+            pady=6,
         )
         self.local_btn.pack(side="left")
 
         self.mic_info_label = tk.Label(
             shell,
-            text=f"🎙  {self.mic_label}",
-            font=(FONT[0], 10),
+            text=f"麦克风 · {self.mic_label}",
+            font=("Segoe UI", 10),
             bg=BG,
-            fg=DIM,
+            fg="#52525b",
         )
-        self.mic_info_label.pack(anchor="w", pady=(0, 10))
+        self.mic_info_label.pack(anchor="w", pady=(0, 8))
 
-        self.live_frame, live_body = self._card(shell, pad=0, accent=False)
-        live_head = tk.Frame(live_body, bg=PANEL)
-        live_head.pack(fill="x", padx=14, pady=(12, 6))
-        self.live_dot = tk.Label(live_head, text="●", font=(FONT[0], 10), bg=PANEL, fg=DIM)
-        self.live_dot.pack(side="left", padx=(0, 6))
+        self.live_frame = tk.Frame(shell, bg=PANEL, highlightbackground=ACCENT, highlightthickness=1)
+        live_head = tk.Frame(self.live_frame, bg=PANEL)
+        live_head.pack(fill="x", padx=12, pady=(8, 4))
         tk.Label(
             live_head,
             text="实时转写",
-            font=(FONT[0], 12, "bold"),
+            font=("Segoe UI", 11, "bold"),
             bg=PANEL,
-            fg=TEXT,
+            fg=ACCENT,
         ).pack(side="left")
-        tk.Label(
+        self._pill_btn(
             live_head,
-            text="录音中更新",
-            font=(FONT[0], 10),
-            bg=PANEL,
-            fg=DIM,
+            "复制实时",
+            self._copy_live,
+            CARD2,
+            fg=TEXT,
+            active_bg=BORDER,
+            font=("Segoe UI", 10),
+            padx=12,
+            pady=4,
         ).pack(side="right")
-        live_inner = tk.Frame(live_body, bg=CARD, padx=14, pady=12)
-        live_inner.pack(fill="x", padx=12, pady=(0, 12))
+        live_body = tk.Frame(self.live_frame, bg=PANEL)
+        live_body.pack(fill="x", padx=1, pady=(0, 10))
+        self.live_scroll = tk.Scrollbar(live_body, orient="vertical")
         self.live_text = tk.Text(
-            live_inner,
-            height=4,
-            font=(FONT[0], 15),
+            live_body,
+            height=5,
+            font=("Segoe UI", 14),
             bg=CARD,
             fg=TEXT,
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
             wrap="word",
-            padx=4,
-            pady=4,
+            padx=12,
+            pady=8,
+            yscrollcommand=self._live_yscroll,
         )
-        self.live_text.pack(fill="x")
+        self.live_scroll.config(command=self.live_text.yview)
+        self.live_scroll.pack(side="right", fill="y")
+        self.live_text.pack(side="left", fill="x", expand=True)
         self.live_text.insert("1.0", "…")
         self.live_text.configure(state="disabled")
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.live_text.bind(seq, lambda _e: self.root.after_idle(self._sync_live_follow))
+        self.live_text.bind("<Control-c>", self._copy_live_key)
+        self.live_text.bind("<Control-C>", self._copy_live_key)
 
         self.out_head = tk.Frame(shell, bg=BG)
-        self.out_head.pack(fill="x", pady=(0, 8))
+        self.out_head.pack(fill="x", pady=(0, 6))
         tk.Label(
             self.out_head,
             text="识别结果",
-            font=(FONT[0], 13, "bold"),
+            font=("Segoe UI", 13, "bold"),
             bg=BG,
             fg=TEXT,
         ).pack(side="left")
-        actions = tk.Frame(self.out_head, bg=BG)
-        actions.pack(side="right")
         self._pill_btn(
-            actions,
+            self.out_head,
             "复制全部",
             self._copy_all,
-            ACCENT_SOFT,
-            fg=ACCENT,
-            active_bg=CARD2,
-            font=(FONT[0], 10, "bold"),
-            padx=14,
-            pady=5,
+            CARD2,
+            fg=TEXT,
+            active_bg=BORDER,
+            font=("Segoe UI", 10),
+            padx=12,
+            pady=4,
         ).pack(side="right", padx=(6, 0))
         self._pill_btn(
-            actions,
+            self.out_head,
             "清空",
             self._clear,
             CARD2,
             fg=MUTED,
-            active_bg=CARD_HOVER,
-            font=(FONT[0], 10),
-            padx=14,
-            pady=5,
+            active_bg=BORDER,
+            font=("Segoe UI", 10),
+            padx=12,
+            pady=4,
         ).pack(side="right")
 
-        out_outer, out_body = self._card(shell, pad=0)
-        out_outer.pack(fill="both", expand=True)
+        out = tk.Frame(shell, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        out.pack(fill="both", expand=True)
         self.text_area = scrolledtext.ScrolledText(
-            out_body,
-            font=(FONT[0], 14),
+            out,
+            font=("Segoe UI", 14),
             bg=CARD,
             fg=TEXT,
-            insertbackground=ACCENT,
-            selectbackground=ACCENT_SOFT,
-            selectforeground=TEXT,
+            insertbackground=TEXT,
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
             wrap="word",
-            padx=16,
-            pady=14,
+            padx=14,
+            pady=12,
         )
-        self.text_area.pack(fill="both", expand=True, padx=12, pady=12)
-        self.text_area.insert(
-            "1.0",
-            "已定稿的文字会保留在这里\n每条录音停止后追加一行\n",
-        )
+        self.text_area.pack(fill="both", expand=True, padx=1, pady=1)
+        self.text_area.insert("1.0", "已定稿的结果会保留在这里\n")
 
-        foot = tk.Frame(shell, bg=BG)
-        foot.pack(fill="x", pady=(12, 0))
-        tk.Label(
-            foot,
-            text="空格键 · 开始 / 停止",
-            font=(FONT[0], 10),
-            bg=BG,
-            fg=DIM,
-        ).pack(side="left")
+        bottom = tk.Frame(shell, bg=BG)
+        bottom.pack(fill="x", pady=(10, 0))
         self._pill_btn(
-            foot,
+            bottom,
             "保存到文件",
             self._save,
             CARD2,
             fg=MUTED,
-            active_bg=CARD_HOVER,
+            active_bg=BORDER,
             padx=14,
-            pady=7,
+            pady=8,
         ).pack(side="right")
 
         self.progress = ttk.Progressbar(
@@ -1051,10 +986,19 @@ class DictationApp:
                     ),
                 )
             except ImportError:
+                venv_pip = os.path.join(os.path.dirname(__file__), ".venv", "bin", "pip")
+                hint = (
+                    "本地模式需安装 faster-whisper · "
+                    f"{venv_pip} install -r requirements-local.txt"
+                )
                 self.root.after(
                     0,
-                    lambda: self.model_label.config(
-                        text="缺少 faster-whisper: pip install faster-whisper"
+                    lambda: (
+                        self.model_label.config(text=hint),
+                        self.status_label.config(
+                            text="本地 Whisper 未安装，请用 Soniox 云端或执行上方命令",
+                            fg=ORANGE,
+                        ),
                     ),
                 )
             except Exception as exc:
@@ -1104,9 +1048,8 @@ class DictationApp:
         self.level_bar["value"] = 0
         self.level_label.config(text="0%")
 
-        self.record_btn.config(text="■  停止并定稿", bg=BTN_ON)
-        self._set_recording_visual(True)
-        self.status_label.config(text="正在连接… 请对着麦克风说话", fg=RED)
+        self.record_btn.config(text="停止录音", bg=BTN_ON)
+        self.status_label.config(text="正在连接… 请对着麦克风说话", fg="#ff6b6b")
         log(f"record start mode={self.mode.get()} rate={self.capture_rate} token={rt_token}")
 
         if self.mode.get() == "soniox":
@@ -1144,8 +1087,7 @@ class DictationApp:
         if rt_token != self._active_rt_token:
             return
         self.recording = False
-        self.record_btn.config(text="●  开始录音", bg=BTN_BG)
-        self._set_recording_visual(False)
+        self.record_btn.config(text="开始录音", bg=BTN_BG)
         self.status_label.config(text=f"连接失败: {msg}", fg="#ff6b6b")
         if self.soniox_session:
             self.soniox_session.abort()
@@ -1163,8 +1105,7 @@ class DictationApp:
 
     def _stop_recording(self):
         self.recording = False
-        self.record_btn.config(text="●  开始录音", bg=BTN_BG)
-        self._set_recording_visual(False)
+        self.record_btn.config(text="开始录音", bg=BTN_BG)
 
         duration = time.time() - self.record_started_at
         raw = np.concatenate(self.local_chunks, axis=0) if self.local_chunks else None
@@ -1239,7 +1180,7 @@ class DictationApp:
     def _commit_result_text(self, text):
         if not text.strip():
             return
-        if self._committed_text.startswith("已定稿的文字") or self._committed_text.startswith(
+        if self._committed_text.startswith("已定稿的结果") or self._committed_text.startswith(
             "录音时这里会实时"
         ):
             self._committed_text = ""
@@ -1374,6 +1315,23 @@ class DictationApp:
         except Exception:
             pass
         os._exit(0)
+
+    def _live_yscroll(self, first, last):
+        self.live_scroll.set(first, last)
+        self.root.after_idle(self._sync_live_follow)
+
+    def _copy_live(self):
+        text = (self._session_live_text or "").strip()
+        if not text:
+            self.status_label.config(text="实时转写还没有内容", fg=ORANGE)
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.status_label.config(text=f"已复制实时转写 — {len(text)} 字", fg=GREEN)
+
+    def _copy_live_key(self, _event=None):
+        self._copy_live()
+        return "break"
 
     def _copy_all(self):
         text = self.text_area.get("1.0", "end-1c")

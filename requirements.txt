@@ -3,5 +3,5 @@ sounddevice
 requests
 websockets>=13.0
 
-# Optional — local offline mode
-# faster-whisper
+# Optional — local offline mode (see requirements-local.txt):
+#   .venv/bin/pip install -r requirements-local.txt
