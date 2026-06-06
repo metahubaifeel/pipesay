@@ -627,7 +627,7 @@ class DictationApp:
         if self.always_on_top:
             self.pin_btn.config(bg=ACCENT, fg=TEXT, text="已置顶", activebackground=ACCENT2)
         else:
-            self.pin_btn.config(bg=CARD2, fg=MUTED, text="置顶", activebackground=BORDER)
+            self.pin_btn.config(bg=CARD2, fg=MUTED, text="置顶", activebackground=CARD_HOVER)
         log(f"always_on_top={self.always_on_top}")
 
     def _setup_styles(self):
@@ -895,8 +895,8 @@ class DictationApp:
         self.mic_info_label.pack(anchor="w", pady=(0, 10))
 
         self.live_frame, live_body = self._card(shell, pad=0, accent=False)
-        live_head = tk.Frame(live_body, bg=PANEL, padx=14, pady=(12, 6))
-        live_head.pack(fill="x")
+        live_head = tk.Frame(live_body, bg=PANEL)
+        live_head.pack(fill="x", padx=14, pady=(12, 6))
         self.live_dot = tk.Label(live_head, text="●", font=(FONT[0], 10), bg=PANEL, fg=DIM)
         self.live_dot.pack(side="left", padx=(0, 6))
         tk.Label(
