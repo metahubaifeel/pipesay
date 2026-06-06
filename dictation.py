@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coco Dictation — 语音转文字桌面应用
+Coco Dictation Lab — 语音转文字桌面应用（拖放实验版）
 Soniox 实时云端 / 本地 Whisper 离线
 """
 import json
@@ -20,11 +20,20 @@ import sounddevice as sd
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+from ui.dnd_handle import DND_AVAILABLE, attach_drag_handle
+
+try:
+    from tkinterdnd2 import TkinterDnD
+except ImportError:
+    TkinterDnD = None
+
 SONIOX_TARGET_RATE = 16000
 CHUNK_MS = 120
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
-LOG_DIR = os.path.expanduser("~/.local/share/coco-dictation")
+APP_NAME = "Coco Dictation Lab"
+LOG_DIR = os.path.expanduser("~/.local/share/coco-dictation-lab")
 LOG_FILE = os.path.join(LOG_DIR, "dictation.log")
+PID_BASENAME = "coco-dictation-lab.pid"
 RAISE_SIGNAL = signal.SIGUSR1
 
 BG = "#09090b"
@@ -449,7 +458,7 @@ class SonioxRealtimeSession:
 class DictationApp:
     def __init__(self, root):
         self.root = root
-        root.title("Coco Dictation")
+        root.title(APP_NAME)
         root.geometry("480x680")
         root.configure(bg=BG)
         root.minsize(400, 560)
@@ -484,10 +493,10 @@ class DictationApp:
         self._register_raise_handler()
         self.root.bind("<space>", self._on_space_key)
         self.root.after(0, self._init_background)
-        log("app started")
+        log("lab app started")
 
     def _write_pid_file(self):
-        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "coco-dictation.pid")
+        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), PID_BASENAME)
         try:
             with open(path, "w") as f:
                 f.write(str(os.getpid()))
@@ -495,7 +504,7 @@ class DictationApp:
             log(f"pid file write failed: {exc}")
 
     def _remove_pid_file(self):
-        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "coco-dictation.pid")
+        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), PID_BASENAME)
         try:
             os.remove(path)
         except OSError:
@@ -718,11 +727,19 @@ class DictationApp:
         header.pack(fill="x", pady=(0, 14))
         tk.Label(
             header,
-            text="Coco Dictation",
+            text=APP_NAME,
             font=("Segoe UI", 22, "bold"),
             bg=BG,
             fg=TEXT,
         ).pack(side="left")
+        if not DND_AVAILABLE:
+            tk.Label(
+                header,
+                text="Lab · 拖放不可用",
+                font=("Segoe UI", 10),
+                bg=BG,
+                fg=ORANGE,
+            ).pack(side="left", padx=(10, 0))
         self.pin_btn = self._pill_btn(
             header,
             "置顶",
@@ -854,6 +871,17 @@ class DictationApp:
             padx=12,
             pady=4,
         ).pack(side="right")
+        attach_drag_handle(
+            live_head,
+            get_text=lambda: self._session_live_text,
+            on_status=self._drag_status,
+            on_empty=self._drag_empty,
+            on_clipboard=self._drag_clipboard,
+            bg=PANEL,
+            fg=TEXT,
+            muted=MUTED,
+            accent=ACCENT,
+        )
         live_body = tk.Frame(self.live_frame, bg=PANEL)
         live_body.pack(fill="x", padx=1, pady=(0, 10))
         self.live_scroll = tk.Scrollbar(live_body, orient="vertical")
@@ -1320,6 +1348,22 @@ class DictationApp:
         self.live_scroll.set(first, last)
         self.root.after_idle(self._sync_live_follow)
 
+    def _drag_status(self, message, kind="info"):
+        colors = {
+            "info": ACCENT,
+            "ok": GREEN,
+            "warn": ORANGE,
+            "hint": MUTED,
+        }
+        self.status_label.config(text=message, fg=colors.get(kind, MUTED))
+
+    def _drag_empty(self):
+        self.status_label.config(text="还没有可拖动的文字", fg=ORANGE)
+
+    def _drag_clipboard(self, text):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
     def _copy_live(self):
         text = (self._session_live_text or "").strip()
         if not text:
@@ -1545,7 +1589,10 @@ def main():
             sec = float(sys.argv[2]) if len(sys.argv) > 2 else 3
             raise SystemExit(cli_test_mic(sec))
 
-    root = tk.Tk()
+    if TkinterDnD is not None:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     app = DictationApp(root)
     root.protocol("WM_DELETE_WINDOW", app.shutdown)
     try:
