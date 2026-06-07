@@ -38,7 +38,7 @@ def attach_drag_handle(
 
     handle = tk.Label(
         parent,
-        text="⋮⋮ 拖动",
+        text="⋮⋮ 拖/复制",
         font=("Segoe UI", 10, "bold"),
         bg=bg,
         fg=accent,
@@ -54,11 +54,11 @@ def attach_drag_handle(
             on_empty()
             return REFUSE_DROP
         on_clipboard(text)
-        on_status("拖动中…松手到目标输入框；若未插入请 Ctrl+V", "info")
+        on_status("已复制 — Cursor 不支持拖入，切过去 Ctrl+V；其他应用可尝试拖放", "info")
         return (COPY, DND_TEXT, text)
 
     def drag_end(_event):
-        on_status("拖动结束 — 若目标未出现文字，请 Ctrl+V", "hint")
+        on_status("已复制到剪贴板 — 在 Cursor 对话框按 Ctrl+V", "hint")
 
     handle.drag_source_register(1, DND_TEXT)
     handle.dnd_bind("<<DragInitCmd>>", drag_init)
@@ -70,7 +70,7 @@ def attach_drag_handle(
     def hide_tip(_event):
         handle.config(fg=accent)
 
-    tip = "拖到输入框松开即可插入；失败时用 Ctrl+V"
+    tip = "拖到输入框可插入；Cursor 等请用「复制实时」或拖后 Ctrl+V"
     handle.bind("<Enter>", lambda e: (on_status(tip, "hint"), show_tip(e)))
     handle.bind("<Leave>", lambda e: hide_tip(e))
 

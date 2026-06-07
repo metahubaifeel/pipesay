@@ -20,6 +20,7 @@ import sounddevice as sd
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+from ui.clipboard_util import set_clipboard
 from ui.dnd_handle import DND_AVAILABLE, attach_drag_handle
 
 try:
@@ -1234,10 +1235,9 @@ class DictationApp:
                 self.soniox_session = None
                 self._finalizing_rt_token = 0
                 if self.auto_copy.get():
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(final)
+                    self._set_clipboard(final)
                     self.status_label.config(
-                        text=f"完成 — {len(final)} 字 · 已复制", fg=GREEN
+                        text=f"完成 — {len(final)} 字 · 已复制 · Cursor 用 Ctrl+V", fg=GREEN
                     )
                 else:
                     self.status_label.config(text=f"完成 — {len(final)} 字", fg=GREEN)
@@ -1276,8 +1276,7 @@ class DictationApp:
         if text.strip():
             self._commit_result_text(text.strip())
             if self.auto_copy.get():
-                self.root.clipboard_clear()
-                self.root.clipboard_append(text.strip())
+                self._set_clipboard(text.strip())
                 self.status_label.config(
                     text=f"完成 — {len(text.strip())} 字 (备用识别) · 已复制", fg=GREEN
                 )
@@ -1360,18 +1359,19 @@ class DictationApp:
     def _drag_empty(self):
         self.status_label.config(text="还没有可拖动的文字", fg=ORANGE)
 
+    def _set_clipboard(self, text):
+        return set_clipboard(self.root, text)
+
     def _drag_clipboard(self, text):
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
+        self._set_clipboard(text)
 
     def _copy_live(self):
         text = (self._session_live_text or "").strip()
         if not text:
             self.status_label.config(text="实时转写还没有内容", fg=ORANGE)
             return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
-        self.status_label.config(text=f"已复制实时转写 — {len(text)} 字", fg=GREEN)
+        self._set_clipboard(text)
+        self.status_label.config(text=f"已复制实时转写 — {len(text)} 字 · 到 Cursor 按 Ctrl+V", fg=GREEN)
 
     def _copy_live_key(self, _event=None):
         self._copy_live()
@@ -1380,9 +1380,8 @@ class DictationApp:
     def _copy_all(self):
         text = self.text_area.get("1.0", "end-1c")
         if text.strip():
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.status_label.config(text="已复制到剪贴板", fg=GREEN)
+            self._set_clipboard(text)
+            self.status_label.config(text="已复制到剪贴板 · Cursor 用 Ctrl+V", fg=GREEN)
         else:
             self.status_label.config(text="没有内容", fg=ORANGE)
 
