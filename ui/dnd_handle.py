@@ -1,4 +1,4 @@
-"""Drag-out handle for Coco Dictation Lab."""
+"""Drag-out handle for PipeSay Lab."""
 
 import tkinter as tk
 

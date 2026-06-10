@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coco Dictation Lab — 语音转文字桌面应用（拖放实验版）
+PipeSay Lab — Linux 桌面实时语音转文字（拖放实验版）
 Soniox 实时云端 / 本地 Whisper 离线
 """
 import json
@@ -31,10 +31,10 @@ except ImportError:
 SONIOX_TARGET_RATE = 16000
 CHUNK_MS = 120
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
-APP_NAME = "Coco Dictation Lab"
-LOG_DIR = os.path.expanduser("~/.local/share/coco-dictation-lab")
+APP_NAME = "PipeSay Lab"
+LOG_DIR = os.path.expanduser("~/.local/share/pipesay-lab")
 LOG_FILE = os.path.join(LOG_DIR, "dictation.log")
-PID_BASENAME = "coco-dictation-lab.pid"
+PID_BASENAME = "pipesay-lab.pid"
 RAISE_SIGNAL = signal.SIGUSR1
 
 BG = "#09090b"
@@ -496,7 +496,7 @@ class DictationApp:
         root.configure(bg=BG)
         root.minsize(400, 560)
         try:
-            root.tk.call("wm", "class", root._w, "coco-dictation-lab", "Coco Dictation Lab")
+            root.tk.call("wm", "class", root._w, "pipesay-lab", APP_NAME)
         except tk.TclError:
             pass
 

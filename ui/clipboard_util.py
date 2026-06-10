@@ -1,4 +1,4 @@
-"""Wayland-friendly clipboard helper for Coco Dictation Lab."""
+"""Wayland-friendly clipboard helper for PipeSay Lab."""
 
 import os
 import subprocess
