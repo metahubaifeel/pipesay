@@ -5,6 +5,7 @@ on:
     branches: [master, experiment/drag-drop]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 jobs:
   test-ui:
@@ -22,6 +23,9 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements.txt
+          if [ "${{ github.ref }}" = "refs/heads/experiment/drag-drop" ]; then
+            .venv/bin/pip install -r requirements-lab.txt
+          fi
       - name: Run --test-ui
         env:
           PIPESAY_TEST_UI: "1"
