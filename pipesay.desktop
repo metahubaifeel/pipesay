@@ -2,7 +2,7 @@
 Name=PipeSay
 Name[zh_CN]=🎙️ PipeSay 听写
 Comment=Linux live dictation — speak, see text, copy
-Exec=/home/amd/下载/dev/stt_tool/run.sh
+Exec=@INSTALL_DIR@/run.sh
 Icon=audio-input-microphone
 Terminal=false
 Type=Application

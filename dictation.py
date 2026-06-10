@@ -20,6 +20,8 @@ import sounddevice as sd
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+from ui.clipboard_util import set_clipboard
+
 SONIOX_TARGET_RATE = 16000
 CHUNK_MS = 120
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
@@ -1317,8 +1319,7 @@ class DictationApp:
                 self.soniox_session = None
                 self._finalizing_rt_token = 0
                 if self.auto_copy.get():
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(final)
+                    self._set_clipboard(final)
                     self.status_label.config(
                         text=f"完成 — {len(final)} 字 · 已复制", fg=GREEN
                     )
@@ -1359,8 +1360,7 @@ class DictationApp:
         if text.strip():
             self._commit_result_text(text.strip())
             if self.auto_copy.get():
-                self.root.clipboard_clear()
-                self.root.clipboard_append(text.strip())
+                self._set_clipboard(text.strip())
                 self.status_label.config(
                     text=f"完成 — {len(text.strip())} 字 (备用识别) · 已复制", fg=GREEN
                 )
@@ -1431,13 +1431,15 @@ class DictationApp:
         self.live_scroll.set(first, last)
         self.root.after_idle(self._sync_live_follow)
 
+    def _set_clipboard(self, text):
+        return set_clipboard(self.root, text)
+
     def _copy_live(self):
         text = (self._session_live_text or "").strip()
         if not text:
             self.status_label.config(text="实时转写还没有内容", fg=ORANGE)
             return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
+        self._set_clipboard(text)
         self._set_status(f"已复制实时转写 — {len(text)} 字", GREEN, hold_sec=2)
 
     def _copy_live_key(self, _event=None):
@@ -1447,8 +1449,7 @@ class DictationApp:
     def _copy_all(self):
         text = self.text_area.get("1.0", "end-1c")
         if text.strip():
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
+            self._set_clipboard(text)
             self._set_status("已复制到剪贴板", GREEN, hold_sec=2)
         else:
             self._set_status("没有内容可复制", ORANGE, hold_sec=2)
