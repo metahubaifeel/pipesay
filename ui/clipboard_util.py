@@ -1,4 +1,4 @@
-"""Wayland-friendly clipboard helper for PipeSay Lab."""
+"""Clipboard helper — Tk + wl-copy on Wayland for Electron/Cursor."""
 
 import os
 import subprocess
@@ -6,8 +6,16 @@ import tkinter as tk
 
 
 def set_clipboard(root: tk.Misc, text: str) -> str:
-    """Copy text; on Wayland prefer wl-copy so Ctrl+V works in Cursor/Electron."""
+    """Copy text. On Wayland also runs wl-copy so Ctrl+V works in Cursor/Electron."""
     text = text or ""
+    mode = "failed"
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update_idletasks()
+        mode = "tk"
+    except tk.TclError:
+        pass
     if os.environ.get("XDG_SESSION_TYPE") == "wayland":
         try:
             subprocess.run(
@@ -19,10 +27,4 @@ def set_clipboard(root: tk.Misc, text: str) -> str:
             return "wayland"
         except (OSError, subprocess.SubprocessError):
             pass
-    try:
-        root.clipboard_clear()
-        root.clipboard_append(text)
-        root.update_idletasks()
-        return "tk"
-    except tk.TclError:
-        return "failed"
+    return mode

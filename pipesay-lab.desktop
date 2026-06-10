@@ -2,7 +2,7 @@
 Name=PipeSay Lab
 Name[zh_CN]=🧪 PipeSay Lab
 Comment=Drag-and-drop experiment — 拖放实验版
-Exec=/home/amd/下载/dev/coco-dictation-lab/run-lab.sh
+Exec=@INSTALL_DIR@/run-lab.sh
 Icon=audio-input-microphone
 Terminal=false
 Type=Application

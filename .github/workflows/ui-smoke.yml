@@ -1,0 +1,26 @@
+name: UI smoke test
+
+on:
+  push:
+    branches: [master, experiment/drag-drop]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System deps (Tk + virtual display)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+      - name: Install Python deps
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - name: Run --test-ui
+        run: xvfb-run -a .venv/bin/python dictation.py --test-ui
