@@ -1,6 +1,6 @@
 # Coco Dictation Lab
 
-拖放实验版，与稳定版 **完全独立**。日常请继续用 [`../stt_tool`](../stt_tool)（`v1.2-stable`）。
+拖放实验版，与稳定版 **完全独立**。日常请继续用 [`../stt_tool`](../stt_tool)（`v1.3-stable`）。本分支标签 **`v1.3-lab`**。
 
 ## 启动
 
@@ -14,8 +14,8 @@ cd /home/amd/下载/dev/coco-dictation-lab
 ### 安装菜单快捷方式（可选）
 
 ```bash
-cp coco-dictation-lab.desktop ~/.local/share/applications/
-update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+./install-desktop.sh
+# 或手动：cp coco-dictation-lab.desktop ~/.local/share/applications/
 ```
 
 ## 与稳定版的区别

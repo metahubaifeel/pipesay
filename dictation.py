@@ -138,37 +138,47 @@ def discover_pipewire_sources():
     return sources
 
 
-def pick_mic_source():
+def list_mic_candidates():
     sources = discover_pipewire_sources()
+    names = {s["name"] for s in sources}
+    candidates = []
+    for token, rate, label in (
+        ("hw_acp63__source", 48000, "内置数字麦克风 (acp63)"),
+        ("hw_Generic_1__source", 44100, "模拟麦克风 (ALC257)"),
+    ):
+        for name in names:
+            if token in name:
+                candidates.append((name, rate, label))
+                break
     for src in sources:
         name = src["name"]
-        if "acp63" in name or "dmic" in name.lower():
-            return name, 48000, "内置数字麦克风 (acp63)"
-    for src in sources:
-        name = src["name"]
-        if "Generic_1__source" in name or "ALC257" in name:
-            return name, 44100, "模拟麦克风 (ALC257)"
-    for src in sources:
-        if src.get("class") == "Audio/Source":
-            return src["name"], 48000, src["name"]
-    return None, 48000, "系统默认"
+        if name not in {c[0] for c in candidates}:
+            candidates.append((name, 48000, name))
+    candidates.append((None, 48000, "系统默认"))
+    return candidates
+
+
+def pick_mic_source(candidate_idx=0):
+    candidates = list_mic_candidates()
+    return candidates[candidate_idx % len(candidates)]
 
 
 def prepare_microphone():
     for cmd in (
         ["amixer", "-c", "1", "set", "Capture", "cap"],
-        ["amixer", "-c", "1", "set", "Mic Boost", "3"],
+        ["amixer", "-c", "1", "set", "Mic Boost", "2"],
     ):
         try:
             subprocess.run(cmd, capture_output=True, timeout=3)
         except Exception:
             pass
 
-    source, sample_rate, label = pick_mic_source()
+    source, sample_rate, label = pick_mic_source(candidate_idx=0)
     if source:
         os.environ["PULSE_SOURCE"] = source
         log(f"mic source={source} rate={sample_rate} label={label}")
     else:
+        os.environ.pop("PULSE_SOURCE", None)
         log("mic source=default")
     return sample_rate, label
 
@@ -178,7 +188,29 @@ def audio_peak(audio):
         return 0.0
     if audio.ndim > 1:
         audio = audio[:, 0]
-    return float(abs(audio).max()) / 32768.0
+    peak = int(np.abs(audio.astype(np.int32)).max())
+    return peak / 32768.0
+
+
+def mic_capture_broken(audio):
+    if audio is None or audio.size == 0:
+        return True
+    flat = audio.reshape(-1)
+    if flat.size < 64:
+        return False
+    samples = flat.astype(np.int32)
+    stuck_min = float(np.mean(samples == -32768))
+    stuck_zero = float(np.mean(samples == 0))
+    if stuck_min > 0.9 or stuck_zero > 0.98:
+        return True
+    window = samples[: min(len(samples), 4096)]
+    return len(np.unique(window)) <= 2 and stuck_min > 0.5
+
+
+def meter_peak(audio):
+    if mic_capture_broken(audio):
+        return 0.0
+    return audio_peak(audio)
 
 
 def prepare_audio_for_stt(audio, src_rate):
@@ -463,6 +495,10 @@ class DictationApp:
         root.geometry("480x680")
         root.configure(bg=BG)
         root.minsize(400, 560)
+        try:
+            root.tk.call("wm", "class", root._w, "coco-dictation-lab", "Coco Dictation Lab")
+        except tk.TclError:
+            pass
 
         self.recording = False
         self.audio_stream = None
@@ -487,6 +523,12 @@ class DictationApp:
         self._session_live_text = ""
         self._committed_text = ""
         self._live_follow = True
+        self._mic_candidate_idx = 0
+        self._mic_broken = False
+        self._mic_broken_streak = 0
+        self._mic_rotate_at = 0.0
+        self._user_status_until = 0.0
+        self._mic_restarting = False
 
         self._setup_styles()
         self._build_ui()
@@ -599,13 +641,20 @@ class DictationApp:
         self._session_live_text = ""
         self._show_live_panel()
 
+    def _set_status(self, text, fg=MUTED, hold_sec=0):
+        self.status_label.config(text=text, fg=fg)
+        if hold_sec > 0:
+            self._user_status_until = time.time() + hold_sec
+
     def _toggle_pin(self):
         self.always_on_top = not self.always_on_top
         self.root.attributes("-topmost", self.always_on_top)
         if self.always_on_top:
             self.pin_btn.config(bg=ACCENT, fg=TEXT, text="已置顶", activebackground=ACCENT2)
+            self._set_status("窗口已置顶", GREEN, hold_sec=2)
         else:
             self.pin_btn.config(bg=CARD2, fg=MUTED, text="置顶", activebackground=BORDER)
+            self._set_status("已取消置顶", MUTED, hold_sec=2)
         log(f"always_on_top={self.always_on_top}")
 
     def _setup_styles(self):
@@ -662,17 +711,65 @@ class DictationApp:
         self.mic_info_label.config(text=f"麦克风 · {self.mic_label} @ {self.capture_rate}Hz")
         self._start_mic_monitor()
 
+    def _mic_stream_active(self):
+        stream = self.audio_stream
+        if not stream or not self.mic_ok:
+            return False
+        try:
+            return bool(stream.active)
+        except Exception:
+            return False
+
+    def _ensure_mic_ready(self):
+        if self._mic_stream_active():
+            return True
+        self._start_mic_monitor()
+        return self.mic_ok
+
+    def _try_next_mic_source(self):
+        if self.recording:
+            return
+        now = time.time()
+        if now - self._mic_rotate_at < 5.0:
+            return
+        self._mic_rotate_at = now
+        self._mic_candidate_idx += 1
+        candidates = list_mic_candidates()
+        if self._mic_candidate_idx >= len(candidates):
+            self._mic_candidate_idx = 0
+        log(f"rotate mic candidate -> {self._mic_candidate_idx}")
+        self._start_mic_monitor()
+
     def _start_mic_monitor(self):
-        prepare_microphone()
-        self.capture_rate, self.mic_label = pick_mic_source()[1:]
+        self._mic_restarting = True
+        source, self.capture_rate, self.mic_label = pick_mic_source(self._mic_candidate_idx)
+        if source:
+            os.environ["PULSE_SOURCE"] = source
+        else:
+            os.environ.pop("PULSE_SOURCE", None)
+        log(f"mic source={source or 'default'} rate={self.capture_rate} label={self.mic_label}")
         self.chunk_samples = self.capture_rate * CHUNK_MS // 1000
         self.mic_info_label.config(text=f"麦克风 · {self.mic_label} @ {self.capture_rate}Hz")
 
         def callback(indata, frames, time_info, status):
-            if self._shutting_down:
-                raise sd.CallbackAbort
-            peak = audio_peak(indata)
-            if self.recording:
+            if self._shutting_down or self._mic_restarting:
+                return
+            broken = mic_capture_broken(indata)
+            peak = 0.0 if broken else audio_peak(indata)
+            meter = meter_peak(indata)
+            if broken:
+                self._mic_broken = True
+                self._mic_broken_streak += 1
+                if self._mic_broken_streak >= 8 and not self.recording:
+                    self._mic_broken_streak = 0
+                    try:
+                        self.root.after(0, self._try_next_mic_source)
+                    except Exception:
+                        pass
+            else:
+                self._mic_broken = False
+                self._mic_broken_streak = 0
+            if self.recording and not broken:
                 chunk = indata.copy()
                 self.local_chunks.append(chunk)
                 self.peak_level = max(self.peak_level, peak)
@@ -683,7 +780,7 @@ class DictationApp:
                     else:
                         self._rt_pending.append(pcm16)
             if self._level_pending is None and not self._shutting_down:
-                self._level_pending = peak
+                self._level_pending = meter
                 try:
                     self.root.after(0, self._flush_level)
                 except Exception:
@@ -710,15 +807,26 @@ class DictationApp:
             self.mic_ok = False
             self.status_label.config(text=f"麦克风不可用: {exc}", fg="#ff6b6b")
             log(f"mic monitor failed: {exc}")
+        finally:
+            self._mic_restarting = False
 
     def _flush_level(self):
         if self._shutting_down:
             return
         peak = self._level_pending or 0.0
         self._level_pending = None
+        if self._mic_broken:
+            self.level_bar["value"] = 0
+            self.level_label.config(text="异常", fg=ORANGE)
+            if not self.recording and time.time() > self._user_status_until:
+                self.status_label.config(
+                    text="麦克风数据异常 — 正在切换输入源，或请注销/重启后再试",
+                    fg=ORANGE,
+                )
+            return
         pct = min(100, int(peak * 100))
         self.level_bar["value"] = pct
-        self.level_label.config(text=f"{pct}%")
+        self.level_label.config(text=f"{pct}%", fg=MUTED)
 
     def _build_ui(self):
         shell = tk.Frame(self.root, bg=BG, padx=20, pady=16)
@@ -992,6 +1100,7 @@ class DictationApp:
 
     def _switch_mode(self, mode):
         if self.recording:
+            self._set_status("录音中无法切换引擎 — 请先停止", ORANGE, hold_sec=2)
             return
         self.mode.set(mode)
         self._refresh_mode_ui()
@@ -1055,10 +1164,9 @@ class DictationApp:
             self.status_label.config(text="本地模型未就绪", fg="#ff6b6b")
             self._load_local_model()
             return
-        if not self.mic_ok:
-            self._start_mic_monitor()
-            if not self.mic_ok:
-                return
+        if not self._ensure_mic_ready():
+            self._set_status("麦克风未就绪", ORANGE, hold_sec=2)
+            return
 
         self._abort_session()
         self._cancel_live_ui()
@@ -1147,13 +1255,15 @@ class DictationApp:
             self.status_label.config(text="录音太短", fg="#ff6b6b")
             return
 
-        if peak < 0.01:
+        if peak < 0.01 or mic_capture_broken(raw):
             self._abort_session()
-            self.status_label.config(
-                text=f"没收到有效声音 (peak={peak:.3f})，请检查麦克风权限/静音",
-                fg="#ff6b6b",
-            )
+            if mic_capture_broken(raw) and peak >= 0.01:
+                msg = "麦克风数据异常(卡死)，已重连 — 请关闭占用麦克风的应用后再试"
+            else:
+                msg = f"没收到有效声音 (peak={peak:.3f})，请检查麦克风权限/静音"
+            self.status_label.config(text=msg, fg="#ff6b6b")
             save_debug_wav(raw, self.capture_rate, "silent")
+            self.root.after(200, self._start_mic_monitor)
             return
 
         if self.mode.get() == "soniox":
@@ -1371,7 +1481,7 @@ class DictationApp:
             self.status_label.config(text="实时转写还没有内容", fg=ORANGE)
             return
         self._set_clipboard(text)
-        self.status_label.config(text=f"已复制实时转写 — {len(text)} 字 · 到 Cursor 按 Ctrl+V", fg=GREEN)
+        self._set_status(f"已复制实时转写 — {len(text)} 字", GREEN, hold_sec=2)
 
     def _copy_live_key(self, _event=None):
         self._copy_live()
@@ -1381,15 +1491,15 @@ class DictationApp:
         text = self.text_area.get("1.0", "end-1c")
         if text.strip():
             self._set_clipboard(text)
-            self.status_label.config(text="已复制到剪贴板 · Cursor 用 Ctrl+V", fg=GREEN)
+            self._set_status("已复制到剪贴板", GREEN, hold_sec=2)
         else:
-            self.status_label.config(text="没有内容", fg=ORANGE)
+            self._set_status("没有内容可复制", ORANGE, hold_sec=2)
 
     def _clear(self):
         self.text_area.delete("1.0", "end")
         self._committed_text = ""
         self._hide_live_panel()
-        self.status_label.config(text="已清空", fg=GRAY)
+        self._set_status("已清空", GRAY, hold_sec=2)
 
     def _save(self):
         text = self.text_area.get("1.0", "end-1c")
@@ -1403,7 +1513,57 @@ class DictationApp:
         )
         with open(path, "w") as f:
             f.write(text)
-        self.status_label.config(text=f"已保存: {path}", fg=GREEN)
+        self._set_status(f"已保存: {path}", GREEN, hold_sec=3)
+
+
+def cli_test_ui_e2e():
+    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
+    root.withdraw()
+    app = DictationApp(root)
+    root.update_idletasks()
+    fails = []
+
+    def check(name, cond):
+        if not cond:
+            fails.append(name)
+
+    app.text_area.delete("1.0", "end")
+    app.text_area.insert("1.0", "E2E按钮测试")
+    app._copy_all()
+    root.update()
+    try:
+        check("copy_all", "E2E" in root.clipboard_get())
+    except tk.TclError:
+        check("copy_all", False)
+
+    app._toggle_pin()
+    root.update()
+    check("pin_on", app.always_on_top)
+    app._toggle_pin()
+    check("pin_off", not app.always_on_top)
+
+    app._switch_mode("local")
+    check("switch_local", app.mode.get() == "local")
+    app._switch_mode("soniox")
+    check("switch_soniox", app.mode.get() == "soniox")
+
+    app._clear()
+    check("clear", not app.text_area.get("1.0", "end-1c").strip())
+
+    app._session_live_text = "实时区测试"
+    app._copy_live()
+    root.update()
+    try:
+        check("copy_live", "实时区测试" in root.clipboard_get())
+    except tk.TclError:
+        check("copy_live", False)
+
+    root.destroy()
+    if fails:
+        print("FAIL:", ", ".join(fails))
+        return 1
+    print("OK: pin, copy_all, copy_live, clear, mode switch")
+    return 0
 
 
 def cli_test_rt_e2e():
@@ -1587,6 +1747,8 @@ def main():
         if sys.argv[1] == "--test-mic":
             sec = float(sys.argv[2]) if len(sys.argv) > 2 else 3
             raise SystemExit(cli_test_mic(sec))
+        if sys.argv[1] == "--test-ui":
+            raise SystemExit(cli_test_ui_e2e())
 
     if TkinterDnD is not None:
         root = TkinterDnD.Tk()

@@ -11,6 +11,8 @@ except ImportError:
     COPY = DND_TEXT = None
     REFUSE_DROP = "refuse_drop"
 
+_DRAG_THRESHOLD = 6
+
 
 def attach_drag_handle(
     parent,
@@ -24,7 +26,7 @@ def attach_drag_handle(
     muted,
     accent,
 ):
-    """Add a drag handle that exports live text to external apps via XDND."""
+    """Drag handle: drag to Discord etc.; click without move copies for browser."""
     if not DND_AVAILABLE:
         label = tk.Label(
             parent,
@@ -38,7 +40,7 @@ def attach_drag_handle(
 
     handle = tk.Label(
         parent,
-        text="⋮⋮ 拖/复制",
+        text="⋮⋮ 拖动",
         font=("Segoe UI", 10, "bold"),
         bg=bg,
         fg=accent,
@@ -48,18 +50,54 @@ def attach_drag_handle(
     )
     handle.pack(side="right", padx=(6, 0))
 
+    pointer = {"x": 0, "y": 0, "moved": False, "dragging": False}
+
+    def copy_for_browser():
+        text = (get_text() or "").strip()
+        if not text:
+            on_empty()
+            return
+        on_clipboard(text)
+        on_status("已复制 — 浏览器请 Ctrl+V；Discord 请按住拖动", "ok")
+
+    def on_press(event):
+        pointer.update(x=event.x, y=event.y, moved=False, dragging=False)
+
+    def on_motion(event):
+        if pointer["moved"]:
+            return
+        if (
+            abs(event.x - pointer["x"]) > _DRAG_THRESHOLD
+            or abs(event.y - pointer["y"]) > _DRAG_THRESHOLD
+        ):
+            pointer["moved"] = True
+
+    def on_release(_event):
+        if not pointer["moved"] and not pointer["dragging"]:
+            copy_for_browser()
+
     def drag_init(_event):
         text = (get_text() or "").strip()
         if not text:
             on_empty()
             return REFUSE_DROP
+        pointer["dragging"] = True
+        pointer["moved"] = True
         on_clipboard(text)
-        on_status("已复制 — Cursor 不支持拖入，切过去 Ctrl+V；其他应用可尝试拖放", "info")
+        on_status("拖动中…松手到 Discord 等输入框", "info")
         return (COPY, DND_TEXT, text)
 
     def drag_end(_event):
-        on_status("已复制到剪贴板 — 在 Cursor 对话框按 Ctrl+V", "hint")
+        pointer["dragging"] = False
+        action = getattr(_event, "action", None)
+        if action and action not in ("", "refuse_drop", REFUSE_DROP):
+            on_status("已拖入目标应用", "ok")
+        else:
+            on_status("若未出现文字，已复制到剪贴板 — 可 Ctrl+V", "hint")
 
+    handle.bind("<ButtonPress-1>", on_press)
+    handle.bind("<B1-Motion>", on_motion)
+    handle.bind("<ButtonRelease-1>", on_release)
     handle.drag_source_register(1, DND_TEXT)
     handle.dnd_bind("<<DragInitCmd>>", drag_init)
     handle.dnd_bind("<<DragEndCmd>>", drag_end)
@@ -70,7 +108,7 @@ def attach_drag_handle(
     def hide_tip(_event):
         handle.config(fg=accent)
 
-    tip = "拖到输入框可插入；Cursor 等请用「复制实时」或拖后 Ctrl+V"
+    tip = "按住拖到 Discord；点一下不移动=复制（浏览器 Ctrl+V）"
     handle.bind("<Enter>", lambda e: (on_status(tip, "hint"), show_tip(e)))
     handle.bind("<Leave>", lambda e: hide_tip(e))
 
