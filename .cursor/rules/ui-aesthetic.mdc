@@ -1,0 +1,33 @@
+---
+description: High-quality UI output — design tokens and prompt discipline
+globs: dictation.py
+alwaysApply: false
+---
+
+# UI aesthetic (this project)
+
+## Design tokens (PipeSay)
+
+Use the existing palette in `dictation.py` — do not invent random hex values:
+
+- Background `#09090b`, panel `#141416`, card `#1c1c1f`, border `#2e2e33`
+- Text `#f4f4f5`, muted `#71717a`, accent `#6366f1`, record `#ef4444`
+- Font: Segoe UI; hierarchy = 22 title / 17 CTA / 14 body / 11 meta
+
+## Layout principles
+
+- One primary action (record button) per screen; status line directly beneath.
+- Generous padding (16–20px shell); rounded panels via `highlightthickness=1` frames.
+- Clear sections: hero (record + meter) → live preview → finalized results.
+- Live region shows partial suffix ` …` only; finalized text never flickers or duplicates.
+
+## When improving UI
+
+1. **Function first** — ship behavior, then polish; never swap the whole toolkit for looks alone.
+2. **Minimal diff** — touch `_build_ui` and colors, not STT/session logic.
+3. **Name the style** — e.g. "minimal dark, zinc + indigo accent, calm density" (not "make it pretty").
+4. **Avoid** HTML-default gray boxes, cramped controls, mixing live + finalized in one scrolling blob.
+
+## Web stack (only if project moves off Tkinter)
+
+React + Tailwind + shadcn/ui; add `.mdc` rules per stack. Not applicable to current `dictation.py`.

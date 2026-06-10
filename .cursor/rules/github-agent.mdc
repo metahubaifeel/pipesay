@@ -10,7 +10,7 @@ alwaysApply: true
 - **禁止** 让用户在聊天里粘贴 Personal Access Token 或密码。
 - 优先使用本机已登录的 `gh` CLI：`gh auth status` 应显示已登录 `metahubaifeel`。
 - 若 `gh` 未登录，引导用户 **仅在本机终端** 执行一次性：`gh auth login -h github.com -p https -w`
-- 仓库：`metahubaifeel/coco-dictation`（私有）。稳定版 `master` / `v1.2-stable`；Lab `experiment/drag-drop`。
+- 仓库：`metahubaifeel/pipesay`。稳定版 `master` / `v1.3-stable`；Lab `experiment/drag-drop`。
 
 ## Agent 可代为执行
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coco Dictation — 语音转文字桌面应用
+PipeSay — Linux 桌面实时语音转文字
 Soniox 实时云端 / 本地 Whisper 离线
 """
 import json
@@ -23,7 +23,9 @@ from tkinter import scrolledtext, ttk
 SONIOX_TARGET_RATE = 16000
 CHUNK_MS = 120
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
-LOG_DIR = os.path.expanduser("~/.local/share/coco-dictation")
+APP_NAME = "PipeSay"
+LOG_DIR = os.path.expanduser("~/.local/share/pipesay")
+PID_BASENAME = "pipesay.pid"
 LOG_FILE = os.path.join(LOG_DIR, "dictation.log")
 RAISE_SIGNAL = signal.SIGUSR1
 
@@ -484,7 +486,7 @@ class SonioxRealtimeSession:
 class DictationApp:
     def __init__(self, root):
         self.root = root
-        root.title("Coco Dictation")
+        root.title(APP_NAME)
         root.geometry("480x680")
         root.configure(bg=BG)
         root.minsize(400, 560)
@@ -528,7 +530,7 @@ class DictationApp:
         log("app started")
 
     def _write_pid_file(self):
-        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "coco-dictation.pid")
+        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), PID_BASENAME)
         try:
             with open(path, "w") as f:
                 f.write(str(os.getpid()))
@@ -536,7 +538,7 @@ class DictationApp:
             log(f"pid file write failed: {exc}")
 
     def _remove_pid_file(self):
-        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "coco-dictation.pid")
+        path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), PID_BASENAME)
         try:
             os.remove(path)
         except OSError:
@@ -825,7 +827,7 @@ class DictationApp:
         header.pack(fill="x", pady=(0, 14))
         tk.Label(
             header,
-            text="Coco Dictation",
+            text=APP_NAME,
             font=("Segoe UI", 22, "bold"),
             bg=BG,
             fg=TEXT,

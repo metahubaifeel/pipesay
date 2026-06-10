@@ -44,8 +44,8 @@ Agent 会用 `gh` / `git push`，**不需要** 你再发 Token。
 
 ## 仓库地址
 
-- https://github.com/metahubaifeel/coco-dictation（**私有**，须登录才看得见）
-- 稳定版：`master` 或 `v1.2-stable`
+- https://github.com/metahubaifeel/pipesay
+- 稳定版：`master` 或 `v1.3-stable`
 - Lab：`experiment/drag-drop`
 
 ## 安全：曾泄露的 Token 请作废
@@ -60,8 +60,8 @@ Agent 会用 `gh` / `git push`，**不需要** 你再发 Token。
 
 ```bash
 gh auth login          # 新电脑登录一次
-git clone https://github.com/metahubaifeel/coco-dictation.git
-cd coco-dictation
-git checkout v1.2-stable
+git clone https://github.com/metahubaifeel/pipesay.git
+cd pipesay
+git checkout v1.3-stable
 # 见 README.md 安装 venv 与 Soniox Key
 ```

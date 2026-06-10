@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/coco-dictation.pid"
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/pipesay.pid"
 
 if [[ -f "$PIDFILE" ]]; then
   old_pid="$(tr -dc '0-9' < "$PIDFILE")"

@@ -1,0 +1,33 @@
+---
+description: PipeSay — stability-first rules (v1.3-stable baseline)
+globs: dictation.py
+alwaysApply: false
+---
+
+# PipeSay — do not break what works
+
+Baseline tag: `v1.3-stable`. UI changes must not regress STT or startup.
+
+## Architecture (keep)
+
+- **Tkinter** desktop app — fast cold start; avoid CustomTkinter unless explicitly requested.
+- **Soniox RT WebSocket** — accumulate `final_tokens` across messages; non-final tokens are per-response only.
+- **Separate UI**: `live_frame` = streaming preview; `text_area` = finalized lines only.
+- **Thread safety**: Soniox callbacks run off main thread → always marshal UI via `_ui()` / `root.after(0, ...)`.
+- **Session tokens**: abort old WS before new record; ignore stale callbacks via `_rt_token`.
+
+## Stop / record flow
+
+- On stop: set `_finalizing_rt_token`, keep live panel updating until `on_finished`.
+- Send `{"type":"finalize"}` then empty frame before closing audio stream.
+- Do not rewrite the whole results widget on every partial — update `live_text` only.
+
+## Mic / audio
+
+- Route via acp63 @ 48kHz + `PULSE_SOURCE`; resample to 16k for Soniox.
+- Always-on mic monitor for level meter; do not block window show on `pw-cli` / amixer.
+- `_ensure_mic_ready()` — do not restart mic stream on every record start.
+
+## Before merging UI work
+
+Run: `.venv/bin/python dictation.py --test-rt-e2e` (live text must grow during stream).
