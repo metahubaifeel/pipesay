@@ -5,6 +5,7 @@ on:
     branches: [master, experiment/drag-drop]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 jobs:
   test-ui:
@@ -14,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: System deps (Tk + virtual display)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-tk xvfb
@@ -22,5 +23,10 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements.txt
+          if [ "${{ github.ref }}" = "refs/heads/experiment/drag-drop" ]; then
+            .venv/bin/pip install -r requirements-lab.txt
+          fi
       - name: Run --test-ui
+        env:
+          PIPESAY_TEST_UI: "1"
         run: xvfb-run -a .venv/bin/python dictation.py --test-ui
