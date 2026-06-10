@@ -4,6 +4,28 @@
 
 PipeSay 是一款面向 Linux 桌面的实时语音转文字工具：对着麦克风说话，文字即时出现在窗口里；停录定稿，自动复制到剪贴板。名字里的 **Pipe** 来自日常用的 **PipeWire**——在 Wayland 桌面上，把声音顺畅地「说」进你的工作流。
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="PipeSay 三态演示：就绪 → 实时转写 → 定稿复制" width="520">
+</p>
+
+---
+
+## 界面一览
+
+| 就绪 | 实时转写（Soniox RT） | 停录定稿 · 自动复制 |
+|:---:|:---:|:---:|
+| ![就绪态](docs/assets/demo-idle.png) | ![听写中](docs/assets/demo-live.png) | ![完成](docs/assets/demo-done.png) |
+| 麦克风电平监控；空格开始/停止 | 上方 **实时转写** 区流式出字；Wayland 下复制走 `wl-copy` | 下方 **识别结果** 定稿；勾选后自动进剪贴板 |
+
+**技术要点（对应上图）：**
+
+- **输入链路**：PipeWire 采集 → 重采样 16 kHz → Soniox WebSocket 实时 token
+- **UI 分区**：`live_frame` 只显示进行中的 partial/final；`text_area` 只追加停录后的定稿行
+- **会话隔离**：每次录音新 `_rt_token`，避免上一轮 WebSocket 回调污染当前 UI
+- **Wayland**：停录复制与「复制实时」在 Wayland 下同时写 Tk 剪贴板并调用 `wl-copy`（Cursor / 浏览器里请 Ctrl+V）
+
+重新生成示意图：`.venv/bin/pip install pillow && .venv/bin/python scripts/generate_readme_assets.py`
+
 ---
 
 ## 为什么做这个项目？
