@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test-ui:
     runs-on: ubuntu-latest
@@ -17,10 +20,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk xvfb libportaudio2
+          sudo apt-get install -y python3-tk xvfb libportaudio2 portaudio19-dev libasound2
       - name: Install Python deps
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements.txt
       - name: Run --test-ui
+        env:
+          PIPESAY_TEST_UI: "1"
         run: xvfb-run -a .venv/bin/python dictation.py --test-ui

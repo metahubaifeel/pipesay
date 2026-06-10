@@ -16,7 +16,6 @@ import signal
 from datetime import datetime
 
 import numpy as np
-import sounddevice as sd
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
@@ -46,6 +45,18 @@ GRAY = MUTED
 BTN_BG = "#ef4444"
 BTN_ON = "#b91c1c"
 WHITE = TEXT
+
+_sd = None
+
+
+def _sounddevice():
+    """Lazy import so --test-ui can run without PortAudio on CI."""
+    global _sd
+    if _sd is None:
+        import sounddevice as sd_mod
+
+        _sd = sd_mod
+    return _sd
 
 
 def log(msg):
@@ -691,6 +702,12 @@ class DictationApp:
         self._toggle_record()
 
     def _init_background(self):
+        if os.environ.get("PIPESAY_TEST_UI"):
+            self.capture_rate = 48000
+            self.mic_label = "测试模式"
+            self.chunk_samples = self.capture_rate * CHUNK_MS // 1000
+            self.mic_info_label.config(text="麦克风 · 测试模式 (无音频)")
+            return
         prepare_microphone()
         self.capture_rate, self.mic_label = pick_mic_source()[1:]
         if not self.mic_label:
@@ -786,7 +803,7 @@ class DictationApp:
                     self.audio_stream.close()
                 except Exception:
                     pass
-            self.audio_stream = sd.InputStream(
+            self.audio_stream = _sounddevice().InputStream(
                 samplerate=self.capture_rate,
                 channels=1,
                 dtype="int16",
@@ -1477,6 +1494,7 @@ class DictationApp:
 
 def cli_test_ui_e2e():
     """Headless smoke test for toolbar button handlers."""
+    os.environ["PIPESAY_TEST_UI"] = "1"
     root = tk.Tk()
     root.withdraw()
     app = DictationApp(root)
@@ -1693,7 +1711,7 @@ def cli_test_mic(seconds=3):
     def cb(indata, frames, ti, st):
         chunks.append(indata.copy())
 
-    with sd.InputStream(samplerate=rate, channels=1, dtype="int16", callback=cb):
+    with _sounddevice().InputStream(samplerate=rate, channels=1, dtype="int16", callback=cb):
         time.sleep(seconds)
 
     raw = np.concatenate(chunks)
