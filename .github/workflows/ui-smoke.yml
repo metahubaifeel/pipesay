@@ -14,10 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: System deps (Tk + virtual display)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk xvfb
+          sudo apt-get install -y python3-tk xvfb libportaudio2
       - name: Install Python deps
         run: |
           python3 -m venv .venv
