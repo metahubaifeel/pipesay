@@ -1,0 +1,29 @@
+---
+description: GitHub 由 Agent 代管；禁止在聊天里索要或接收 Token
+alwaysApply: true
+---
+
+# GitHub 代管约定
+
+## 凭证
+
+- **禁止** 让用户在聊天里粘贴 Personal Access Token 或密码。
+- 优先使用本机已登录的 `gh` CLI：`gh auth status` 应显示已登录 `metahubaifeel`。
+- 若 `gh` 未登录，引导用户 **仅在本机终端** 执行一次性：`gh auth login -h github.com -p https -w`
+- 仓库：`metahubaifeel/coco-dictation`（私有）。稳定版 `master` / `v1.2-stable`；Lab `experiment/drag-drop`。
+
+## Agent 可代为执行
+
+- `git status` / `commit` / `push` / `tag`
+- `gh repo view` / `gh release create`
+- 换机说明更新 README
+
+## 永不提交
+
+- `.soniox_key`、任何 API Key、`.env`、token 文件
+
+## 用户说「帮我推到 GitHub / 备份 / 换电脑能用」
+
+1. 检查 `gh auth status`
+2. 未登录则给出 **一条** 本机登录命令，等用户完成后再 push
+3. 已登录则直接操作，完成后回报仓库 URL 与分支说明
