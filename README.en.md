@@ -55,7 +55,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 # Soniox API key (real-time cloud STT — register at soniox.com, usage-based billing)
+# Any one of: in-app **Set Key** button, or:
 echo "YOUR_KEY" > ~/.soniox_key
+# or: export SONIOX_API_KEY=YOUR_KEY
 
 chmod +x run.sh install-desktop.sh
 ./run.sh

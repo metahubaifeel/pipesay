@@ -55,7 +55,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 # Soniox API Key（实时转写，需在 soniox.com 注册，按量计费）
+# 任选其一：应用内点「设置 Key」，或：
 echo "你的KEY" > ~/.soniox_key
+# 或：export SONIOX_API_KEY=你的KEY
 
 chmod +x run.sh install-desktop.sh
 ./run.sh
