@@ -12,7 +12,7 @@
 - [x] `docs/assets/` 演示 GIF + 三态截图
 - [x] CI `--test-ui` 通过
 - [x] 应用菜单仅 **PipeSay** / **PipeSay Lab**
-- [ ] 本机录一条 **15～30 秒实机演示**（比示意图更有说服力，见下方「实机素材」）
+- [x] 本机录一条 **15～30 秒实机演示**（`docs/assets/demo-real.gif`）
 - [ ] Soniox Key 说明写清楚：**需自行注册，按量计费**
 
 ---
@@ -21,7 +21,8 @@
 
 | 文件 | 用途 |
 |------|------|
-| `docs/assets/demo.gif` | GitHub / 推特 / 即刻动图 |
+| `docs/assets/demo-real.gif` | GitHub / 推特 / 即刻动图（实机录屏） |
+| `docs/assets/demo-synthetic.gif` | 脚本生成的三态示意（可选，非主推） |
 | `docs/assets/demo-live.png` | 实时转写截图 |
 | `docs/assets/demo-done.png` | 定稿复制截图 |
 | `docs/assets/launch-banner.png` | 推特/X/知乎头图（1200×630） |
@@ -34,13 +35,15 @@
 .venv/bin/python scripts/generate_readme_assets.py
 ```
 
-### 实机素材（建议补一条）
+### 实机 GIF（已就绪）
 
-用 OBS 录 15 秒：打开 PipeSay → 说话 → 实时出字 → 停录 → Ctrl+V 贴进编辑器。
+当前主推：`docs/assets/demo-real.gif`（GNOME 录屏 → ffmpeg 转 GIF）。
+
+用 OBS / 系统录屏录 15～30 秒：打开 PipeSay → 说话 → 实时出字 → 停录 → Ctrl+V 贴进编辑器。
 
 ```bash
-# 录完后转成小体积 GIF 方便发即刻/推特
-ffmpeg -i 你的演示.mp4 -vf "fps=12,scale=960:-1" -y docs/assets/demo-real.gif
+# mp4 或 webm 均可
+ffmpeg -i 你的录屏.webm -vf "fps=12,scale=960:-1" -y docs/assets/demo-real.gif
 ```
 
 ---
@@ -93,7 +96,7 @@ https://github.com/metahubaifeel/pipesay
 #Linux #开源 #Wayland #语音转文字
 ```
 
-配图：`demo.gif` 或实机录屏 GIF
+配图：`demo-real.gif`
 
 ---
 
@@ -112,7 +115,7 @@ https://github.com/metahubaifeel/pipesay
 #Linux #OpenSource #Wayland #SpeechToText
 ```
 
-配图：`launch-banner.png` + `demo.gif`
+配图：`launch-banner.png` + `demo-real.gif`
 
 ---
 
@@ -196,7 +199,7 @@ Wayland + PipeWire 上的小工具，说话实时出字，停录复制。
 仓库：https://github.com/metahubaifeel/pipesay
 ```
 
-配图：`demo.gif`
+配图：`demo-real.gif`
 
 ---
 
@@ -216,7 +219,7 @@ https://github.com/metahubaifeel/pipesay
 
 ## 发布顺序建议
 
-1. **GitHub** — 确认 README 首屏 GIF 正常（已 OK）
+1. **GitHub** — 确认 README 首屏 `demo-real.gif` 正常
 2. **即刻 / V2EX** — 技术向，反馈快
 3. **推特/X** — 带 banner + GIF
 4. **知乎** — 长故事版

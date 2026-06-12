@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate README screenshots and demo GIF (Pillow render, no display needed)."""
+"""Generate README screenshots and synthetic demo GIF (Pillow render, no display needed)."""
 
 import os
 import sys
@@ -233,7 +233,8 @@ def main():
         frames.append(img)
         print(f"  {name}: {os.path.getsize(path) // 1024} KiB")
 
-    gif_path = os.path.join(ASSETS, "demo.gif")
+    # Production README uses docs/assets/demo-real.gif (screen recording via ffmpeg).
+    gif_path = os.path.join(ASSETS, "demo-synthetic.gif")
     frames[0].save(
         gif_path,
         save_all=True,
@@ -242,7 +243,7 @@ def main():
         loop=0,
         optimize=True,
     )
-    print(f"  demo.gif: {os.path.getsize(gif_path) // 1024} KiB")
+    print(f"  demo-synthetic.gif: {os.path.getsize(gif_path) // 1024} KiB")
 
     banner_path = os.path.join(ASSETS, "launch-banner.png")
     render_banner().save(banner_path, optimize=True)
