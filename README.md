@@ -2,6 +2,8 @@
 
 **Speak on Linux. See words land.**
 
+[English README](README.en.md)
+
 PipeSay 是一款面向 Linux 桌面的实时语音转文字工具：对着麦克风说话，文字即时出现在窗口里；停录定稿，自动复制到剪贴板。名字里的 **Pipe** 来自日常用的 **PipeWire**——在 Wayland 桌面上，把声音顺畅地「说」进你的工作流。
 
 <p align="center">
