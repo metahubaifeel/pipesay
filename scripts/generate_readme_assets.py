@@ -148,6 +148,70 @@ def render_frame(state: str):
     return img
 
 
+def render_banner():
+    """1200×630 social / Open Graph banner."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    bw, bh = 1200, 630
+    img = Image.new("RGB", (bw, bh), BG)
+    draw = ImageDraw.Draw(img)
+    title_f = ImageFont.truetype(FONT_LATIN, 72)
+    sub_f = ImageFont.truetype(FONT_CJK, 28)
+    tag_f = ImageFont.truetype(FONT_CJK, 20)
+    url_f = ImageFont.truetype(FONT_LATIN, 22)
+
+    draw.rounded_rectangle((40, 40, bw - 40, bh - 40), radius=24, fill=PANEL, outline=BORDER)
+    draw.text((72, 72), APP_NAME, font=title_f, fill=TEXT)
+    draw.text((72, 160), "Linux 桌面实时听写 · 说完即复制", font=sub_f, fill=ACCENT)
+    draw.text((72, 210), "PipeWire + Wayland · Soniox 实时出字 · MIT 开源", font=tag_f, fill=MUTED)
+
+    preview = render_frame("live")
+    preview.thumbnail((320, 500), Image.LANCZOS)
+    px = bw - preview.width - 72
+    py = (bh - preview.height) // 2
+    draw.rounded_rectangle(
+        (px - 8, py - 8, px + preview.width + 8, py + preview.height + 8),
+        radius=16,
+        outline=ACCENT,
+    )
+    img.paste(preview, (px, py))
+
+    draw.text((72, bh - 100), "github.com/metahubaifeel/pipesay", font=url_f, fill=MUTED)
+    _rect(draw, (72, bh - 145, 72 + 180, bh - 105), BTN_BG, r=12)
+    draw.text((92, bh - 138), "免费开源", font=tag_f, fill=TEXT)
+    return img
+
+
+def render_square():
+    """1080×1080 for 小红书 / 朋友圈 square posts."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    sz = 1080
+    img = Image.new("RGB", (sz, sz), BG)
+    draw = ImageDraw.Draw(img)
+    title_f = ImageFont.truetype(FONT_LATIN, 64)
+    sub_f = ImageFont.truetype(FONT_CJK, 36)
+    tag_f = ImageFont.truetype(FONT_CJK, 24)
+
+    draw.text((60, 60), APP_NAME, font=title_f, fill=TEXT)
+    draw.text((60, 140), "说话 → 实时出字 → 自动复制", font=sub_f, fill=ACCENT)
+
+    preview = render_frame("live")
+    preview.thumbnail((880, 680), Image.LANCZOS)
+    px = (sz - preview.width) // 2
+    py = 220
+    draw.rounded_rectangle(
+        (px - 12, py - 12, px + preview.width + 12, py + preview.height + 12),
+        radius=20,
+        outline=ACCENT,
+    )
+    img.paste(preview, (px, py))
+
+    draw.text((60, sz - 80), "Linux · Wayland · PipeWire · MIT", font=tag_f, fill=MUTED)
+    draw.text((60, sz - 130), "github.com/metahubaifeel/pipesay", font=tag_f, fill=MUTED)
+    return img
+
+
 def main():
     try:
         from PIL import Image
@@ -179,6 +243,15 @@ def main():
         optimize=True,
     )
     print(f"  demo.gif: {os.path.getsize(gif_path) // 1024} KiB")
+
+    banner_path = os.path.join(ASSETS, "launch-banner.png")
+    render_banner().save(banner_path, optimize=True)
+    print(f"  launch-banner.png: {os.path.getsize(banner_path) // 1024} KiB")
+
+    square_path = os.path.join(ASSETS, "launch-square.png")
+    render_square().save(square_path, optimize=True)
+    print(f"  launch-square.png: {os.path.getsize(square_path) // 1024} KiB")
+
     print("Wrote:", ASSETS)
     return 0
 

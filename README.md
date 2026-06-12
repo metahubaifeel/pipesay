@@ -133,4 +133,10 @@ MIT — 见 [LICENSE](LICENSE)。
 
 ---
 
+## Launch / 自媒体
+
+发即刻、V2EX、知乎、小红书等：文案 + 配图清单见 **[docs/LAUNCH.md](docs/LAUNCH.md)**（含 `launch-banner.png` / `launch-square.png`）。
+
+---
+
 *Built on Linux, for people who type with their voice.*
