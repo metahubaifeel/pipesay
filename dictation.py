@@ -29,6 +29,7 @@ except ImportError:
 
 SONIOX_TARGET_RATE = 16000
 CHUNK_MS = 120
+SONIOX_KEY_FILE = os.path.expanduser("~/.soniox_key")
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 APP_NAME = "PipeSay Lab"
 LOG_DIR = os.path.expanduser("~/.local/share/pipesay-lab")
@@ -77,13 +78,38 @@ def get_soniox_key():
     if key:
         return key.strip()
     for path in (
-        os.path.expanduser("~/.soniox_key"),
+        SONIOX_KEY_FILE,
         os.path.join(os.path.dirname(__file__), ".soniox_key"),
     ):
         if os.path.exists(path):
             with open(path) as f:
-                return f.read().strip()
+                key = f.read().strip()
+                if key:
+                    return key
     return None
+
+
+def save_soniox_key(key: str):
+    """Write Soniox API key to ~/.soniox_key (mode 0600). Returns error text or None."""
+    key = (key or "").strip()
+    if not key:
+        return "Key 不能为空"
+    try:
+        with open(SONIOX_KEY_FILE, "w") as f:
+            f.write(key + "\n")
+        os.chmod(SONIOX_KEY_FILE, 0o600)
+        return None
+    except OSError as exc:
+        return str(exc)
+
+
+def friendly_soniox_error(message: str) -> str:
+    msg = (message or "").lower()
+    if "balance exhausted" in msg:
+        return "Soniox 余额不足，请登录 soniox.com 充值"
+    if "invalid" in msg and "api" in msg:
+        return "Soniox API Key 无效，请点「API Key」检查"
+    return message or "未知错误"
 
 
 def render_tokens(final_tokens, non_final_tokens):
@@ -935,8 +961,18 @@ class DictationApp:
             selectcolor=CARD,
             highlightthickness=0,
         ).pack(side="left")
+        self.key_btn = self._pill_btn(
+            opts,
+            "API Key — 点此设置",
+            self._open_soniox_key_dialog,
+            ORANGE,
+            font=("Segoe UI", 10, "bold"),
+            padx=14,
+            pady=5,
+        )
+        self.key_btn.pack(side="right")
         self.model_label = tk.Label(opts, text="", font=("Segoe UI", 10), bg=BG, fg=MUTED)
-        self.model_label.pack(side="right")
+        self.model_label.pack(side="right", padx=(0, 10))
 
         mode_frame = tk.Frame(shell, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
         mode_frame.pack(fill="x", pady=(0, 10))
@@ -1102,9 +1138,33 @@ class DictationApp:
             shell, mode="indeterminate", style="Busy.Horizontal.TProgressbar"
         )
         self._refresh_mode_ui()
+        if not get_soniox_key():
+            self.status_label.config(
+                text="首次使用：点右上角「API Key」填入 Soniox Key（soniox.com 注册）",
+                fg=ORANGE,
+            )
+
+    def _refresh_key_btn(self):
+        key = get_soniox_key()
+        if key:
+            tail = key[-4:] if len(key) > 4 else "已配置"
+            self.key_btn.config(
+                text=f"API Key ·…{tail}",
+                bg=CARD2,
+                fg=TEXT,
+                font=("Segoe UI", 10),
+            )
+        else:
+            self.key_btn.config(
+                text="API Key — 点此设置",
+                bg=ORANGE,
+                fg=TEXT,
+                font=("Segoe UI", 10, "bold"),
+            )
 
     def _refresh_mode_ui(self):
         mode = self.mode.get()
+        self._refresh_key_btn()
         if mode == "soniox":
             self.soniox_btn.config(bg=ACCENT, fg=TEXT, font=("Segoe UI", 10, "bold"))
             self.local_btn.config(bg=CARD2, fg=MUTED, font=("Segoe UI", 10))
@@ -1114,6 +1174,87 @@ class DictationApp:
             self.soniox_btn.config(bg=CARD2, fg=MUTED, font=("Segoe UI", 10))
             if self.whisper_model:
                 self.model_label.config(text="small 模型已就绪")
+            else:
+                self.model_label.config(text="")
+
+    def _open_soniox_key_dialog(self):
+        if self.recording:
+            self._set_status("录音中无法修改 API Key — 请先停止", ORANGE, hold_sec=2)
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Soniox API Key")
+        win.configure(bg=PANEL)
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        body = tk.Frame(win, bg=PANEL, padx=20, pady=16)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(
+            body,
+            text="Soniox API Key",
+            font=("Segoe UI", 13, "bold"),
+            bg=PANEL,
+            fg=TEXT,
+        ).pack(anchor="w")
+        tk.Label(
+            body,
+            text="在 soniox.com 注册后获取。保存到 ~/.soniox_key，仅本机可读。",
+            font=("Segoe UI", 10),
+            bg=PANEL,
+            fg=MUTED,
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w", pady=(6, 12))
+
+        entry = tk.Entry(
+            body,
+            font=("Segoe UI", 11),
+            bg=CARD,
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat",
+            show="*",
+            width=42,
+        )
+        entry.pack(fill="x", ipady=6)
+        existing = get_soniox_key()
+        if existing:
+            entry.insert(0, existing)
+
+        hint = tk.Label(body, text="", font=("Segoe UI", 10), bg=PANEL, fg="#ff6b6b")
+        hint.pack(anchor="w", pady=(8, 0))
+
+        btns = tk.Frame(body, bg=PANEL)
+        btns.pack(fill="x", pady=(14, 0))
+
+        def close():
+            win.grab_release()
+            win.destroy()
+
+        def save():
+            err = save_soniox_key(entry.get())
+            if err:
+                hint.config(text=err, fg="#ff6b6b")
+                return
+            self._refresh_mode_ui()
+            self._set_status("API Key 已保存", GREEN, hold_sec=2)
+            close()
+
+        self._pill_btn(btns, "保存", save, ACCENT, padx=16, pady=6).pack(side="right")
+        self._pill_btn(
+            btns, "取消", close, CARD2, fg=MUTED, active_bg=BORDER, padx=16, pady=6
+        ).pack(side="right", padx=(0, 8))
+
+        win.bind("<Escape>", lambda _e: close())
+        entry.bind("<Return>", lambda _e: save())
+        entry.focus_set()
+        win.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - win.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - win.winfo_height()) // 2
+        win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
     def _switch_mode(self, mode):
         if self.recording:
@@ -1175,7 +1316,10 @@ class DictationApp:
 
     def _start_recording(self):
         if self.mode.get() == "soniox" and not get_soniox_key():
-            self.status_label.config(text="未配置 Soniox API Key", fg="#ff6b6b")
+            self.status_label.config(
+                text="未配置 Soniox API Key — 点右上角「API Key」",
+                fg="#ff6b6b",
+            )
             return
         if self.mode.get() == "local" and not self.whisper_model:
             self.status_label.config(text="本地模型未就绪", fg="#ff6b6b")
@@ -1328,7 +1472,9 @@ class DictationApp:
                 return
             self.progress.stop()
             self.progress.pack_forget()
-            self.status_label.config(text=f"识别错误: {message}", fg="#ff6b6b")
+            self.status_label.config(
+                text=f"识别错误: {friendly_soniox_error(message)}", fg="#ff6b6b"
+            )
             self._fallback_async("soniox-error", rt_token)
 
         self._ui(update)
