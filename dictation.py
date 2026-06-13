@@ -109,8 +109,8 @@ def friendly_soniox_error(message: str) -> str:
         return "Soniox 余额不足，请登录 soniox.com 充值"
     if "invalid" in msg and "api" in msg:
         return "Soniox API Key 无效，请点「API Key」检查"
-    if "408" in msg or "timeout" in msg:
-        return "未收到麦克风音频（请检查输入是否异常，或重新点录音）"
+    if "408" in msg or "timeout" in msg or "decode" in msg:
+        return "麦克风无有效音频（可能卡死 -32768，请停录后重试或重启 PipeWire）"
     return message or "未知错误"
 
 
@@ -581,6 +581,8 @@ class DictationApp:
         self._mic_broken_streak = 0
         self._mic_rotate_at = 0.0
         self._mic_warmup_until = 0.0
+        self._mic_stuck_streak = 0
+        self._mic_stuck_active = False
         self._user_status_until = 0.0
         self._mic_restarting = False
 
@@ -800,6 +802,16 @@ class DictationApp:
         log(f"rotate mic candidate -> {self._mic_candidate_idx}")
         self._start_mic_monitor()
 
+    def _recover_mic_stream(self):
+        if self._mic_restarting:
+            return
+        log("mic stuck -32768, restarting stream")
+        prepare_microphone()
+        self._mic_warmup_until = time.time() + 1.5
+        self._start_mic_monitor()
+        if self.recording:
+            self._set_status("麦克风卡死已重连 — 请继续说话", ORANGE, hold_sec=3)
+
     def _start_mic_monitor(self):
         self._mic_restarting = True
         self._mic_broken = False
@@ -820,9 +832,22 @@ class DictationApp:
             peak = audio_peak(indata)
             broken = mic_capture_broken(indata)
             stuck_min = mic_capture_stuck_min(indata)
+            self._mic_stuck_active = stuck_min
             if self.recording and broken and not stuck_min and peak >= 0.015:
                 broken = False
-            meter = peak if self.recording else meter_peak(indata)
+            if stuck_min:
+                meter = 0.0
+                if self.recording:
+                    self._mic_stuck_streak += 1
+                    if self._mic_stuck_streak >= 4 and not self._mic_restarting:
+                        self._mic_stuck_streak = 0
+                        try:
+                            self.root.after(0, self._recover_mic_stream)
+                        except Exception:
+                            pass
+            else:
+                self._mic_stuck_streak = 0
+                meter = peak if self.recording else meter_peak(indata)
             warming_up = time.time() < self._mic_warmup_until
             if broken and not warming_up and not self.recording:
                 self._mic_broken = True
@@ -885,6 +910,10 @@ class DictationApp:
             return
         peak = self._level_pending or 0.0
         self._level_pending = None
+        if self.recording and self._mic_stuck_active:
+            self.level_bar["value"] = 0
+            self.level_label.config(text="卡死", fg=ORANGE)
+            return
         if self._mic_broken and not self.recording:
             self.level_bar["value"] = 0
             self.level_label.config(text="异常", fg=ORANGE)
@@ -1360,6 +1389,9 @@ class DictationApp:
 
         self._mic_broken = False
         self._mic_broken_streak = 0
+        self._mic_stuck_streak = 0
+        self._mic_stuck_active = False
+        prepare_microphone()
         if self._mic_candidate_idx != 0:
             self._mic_candidate_idx = 0
             self._start_mic_monitor()
