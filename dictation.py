@@ -520,10 +520,13 @@ class SonioxRealtimeSession:
                 return
             final_text = render_tokens(self.final_tokens, [])
             log(f"soniox recv error: {exc}; partial len={len(final_text)}")
-            if final_text.strip():
-                self.on_finished(final_text)
-            elif self._running:
-                self.on_error(str(exc))
+            if not self._aborted:
+                if self._running:
+                    self.on_error(str(exc))
+                elif final_text.strip():
+                    self.on_finished(final_text)
+                else:
+                    self.on_error(str(exc))
         finally:
             try:
                 self._ws.close()
@@ -559,6 +562,7 @@ class DictationApp:
         self._rt_token = 0
         self._active_rt_token = 0
         self._finalizing_rt_token = 0
+        self._finalize_timeout_id = None
         self._session_live_text = ""
         self._committed_text = ""
         self._live_follow = True
@@ -1417,6 +1421,7 @@ class DictationApp:
                 self.progress.pack(pady=(6, 0))
                 self.progress.start()
                 self.soniox_session.stop()
+                self._schedule_finalize_timeout(self._finalizing_rt_token)
             return
 
         if raw is None:
@@ -1432,7 +1437,53 @@ class DictationApp:
             daemon=True,
         ).start()
 
+    def _schedule_finalize_timeout(self, rt_token, sec=12):
+        self._cancel_finalize_timeout()
+        self._finalize_timeout_id = self.root.after(
+            int(sec * 1000), lambda t=rt_token: self._on_finalize_timeout(t)
+        )
+
+    def _cancel_finalize_timeout(self):
+        tid = self._finalize_timeout_id
+        if tid:
+            try:
+                self.root.after_cancel(tid)
+            except Exception:
+                pass
+        self._finalize_timeout_id = None
+
+    def _on_finalize_timeout(self, rt_token):
+        self._finalize_timeout_id = None
+        if rt_token != self._finalizing_rt_token:
+            return
+        log(f"finalize timeout token={rt_token}")
+        self._abort_session()
+        self.progress.stop()
+        self.progress.pack_forget()
+        final = (self._session_live_text or "").strip()
+        self._finalizing_rt_token = 0
+        self._hide_live_panel()
+        if final:
+            self._commit_result_text(final)
+            if self.auto_copy.get():
+                self._set_clipboard(final)
+                self.status_label.config(
+                    text=f"完成 — {len(final)} 字 · 已复制（连接超时，已用已识别文字）",
+                    fg=GREEN,
+                )
+            else:
+                self.status_label.config(
+                    text=f"完成 — {len(final)} 字（连接超时，已用已识别文字）",
+                    fg=GREEN,
+                )
+        else:
+            self.status_label.config(
+                text="定稿超时（休眠/网络断开后常见）— 请重新开始录音",
+                fg=ORANGE,
+            )
+
     def _abort_session(self):
+        self._cancel_finalize_timeout()
         session = self.soniox_session
         if session:
             session.abort()
@@ -1452,6 +1503,18 @@ class DictationApp:
 
         def update():
             if rt_token not in (self._active_rt_token, self._finalizing_rt_token):
+                return
+            if (
+                rt_token == self._active_rt_token
+                and self.recording
+                and rt_token != self._finalizing_rt_token
+            ):
+                self.status_label.config(
+                    text="云端连接断开（休眠/网络）— 停录后将保留已识别文字",
+                    fg=ORANGE,
+                )
+                if self.soniox_session:
+                    self.soniox_session._aborted = True
                 return
             self.progress.stop()
             self.progress.pack_forget()
@@ -1482,6 +1545,7 @@ class DictationApp:
         def update():
             if rt_token != self._finalizing_rt_token:
                 return
+            self._cancel_finalize_timeout()
             self.progress.stop()
             self.progress.pack_forget()
             final = (text or self._session_live_text or "").strip()
@@ -1581,6 +1645,7 @@ class DictationApp:
         if self._shutting_down:
             return
         self._shutting_down = True
+        self._cancel_finalize_timeout()
         self.recording = False
         self._abort_session()
         if self.audio_stream:
