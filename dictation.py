@@ -570,6 +570,7 @@ class DictationApp:
         self._mic_broken = False
         self._mic_broken_streak = 0
         self._mic_rotate_at = 0.0
+        self._mic_warmup_until = 0.0
         self._user_status_until = 0.0
         self._mic_restarting = False
 
@@ -791,6 +792,9 @@ class DictationApp:
 
     def _start_mic_monitor(self):
         self._mic_restarting = True
+        self._mic_broken = False
+        self._mic_broken_streak = 0
+        self._mic_warmup_until = time.time() + 3.0
         source, self.capture_rate, self.mic_label = pick_mic_source(self._mic_candidate_idx)
         if source:
             os.environ["PULSE_SOURCE"] = source
@@ -806,18 +810,21 @@ class DictationApp:
             broken = mic_capture_broken(indata)
             peak = 0.0 if broken else audio_peak(indata)
             meter = meter_peak(indata)
-            if broken:
+            warming_up = time.time() < self._mic_warmup_until
+            if broken and not warming_up:
                 self._mic_broken = True
                 self._mic_broken_streak += 1
-                if self._mic_broken_streak >= 8 and not self.recording:
+                if self._mic_broken_streak >= 25 and not self.recording:
                     self._mic_broken_streak = 0
                     try:
                         self.root.after(0, self._try_next_mic_source)
                     except Exception:
                         pass
-            else:
+            elif not broken:
                 self._mic_broken = False
                 self._mic_broken_streak = 0
+            elif warming_up:
+                self._mic_broken = False
             if self.recording and not broken:
                 chunk = indata.copy()
                 self.local_chunks.append(chunk)
@@ -868,10 +875,12 @@ class DictationApp:
             self.level_bar["value"] = 0
             self.level_label.config(text="异常", fg=ORANGE)
             if not self.recording and time.time() > self._user_status_until:
-                self.status_label.config(
-                    text="麦克风数据异常 — 正在切换输入源，或请注销/重启后再试",
-                    fg=ORANGE,
-                )
+                hint = "麦克风数据异常"
+                if "acp63" not in self.mic_label and self._mic_candidate_idx != 0:
+                    hint += " — 已切到备用麦，建议重启应用恢复内置麦"
+                else:
+                    hint += " — 合盖/长时间录音后常见，请重启 PipeSay 或 PipeWire"
+                self.status_label.config(text=hint, fg=ORANGE)
             return
         pct = min(100, int(peak * 100))
         self.level_bar["value"] = pct
