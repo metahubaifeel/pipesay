@@ -588,6 +588,8 @@ class DictationApp:
         self._mic_recover_attempts = 0
         self._user_status_until = 0.0
         self._mic_restarting = False
+        self._last_tick = time.time()
+        self._suspended = False
 
         self._setup_styles()
         self._build_ui()
@@ -595,6 +597,7 @@ class DictationApp:
         self._register_raise_handler()
         self.root.bind("<space>", self._on_space_key)
         self.root.after(0, self._init_background)
+        self._schedule_suspend_watch()
         log("app started")
 
     def _write_pid_file(self):
@@ -611,6 +614,67 @@ class DictationApp:
             os.remove(path)
         except OSError:
             pass
+
+    def _schedule_suspend_watch(self):
+        if self._shutting_down:
+            return
+        self.root.after(5000, self._check_suspend)
+
+    def _check_suspend(self):
+        if self._shutting_down:
+            return
+        now = time.time()
+        gap = now - self._last_tick
+        self._last_tick = now
+
+        if gap > 30 and not self._suspended:
+            self._suspended = True
+            log(f"suspend detected: gap={gap:.0f}s")
+            self._on_resume()
+
+        if self._suspended and gap < 10:
+            self._suspended = False
+
+        self.root.after(5000, self._check_suspend)
+
+    def _on_resume(self):
+        was_recording = self.recording
+        if self.recording:
+            log("auto-stop recording on resume from suspend")
+            self.recording = False
+            self.record_btn.config(text="开始录音", bg=BTN_BG)
+            self._abort_session()
+            self._hide_live_panel()
+
+        if self.audio_stream:
+            try:
+                self.audio_stream.stop()
+                self.audio_stream.close()
+            except Exception:
+                pass
+            self.audio_stream = None
+            self.mic_ok = False
+
+        self._mic_candidate_idx = 0
+        self._mic_broken = False
+        self._mic_broken_streak = 0
+        self._mic_stuck_streak = 0
+        self._mic_stuck_active = False
+        self._mic_recover_attempts = 0
+
+        def reinit():
+            prepare_microphone()
+            self._mic_warmup_until = time.time() + 3.0
+            self._start_mic_monitor()
+            if was_recording:
+                self._set_status(
+                    "休眠已恢复 — 录音已自动停止，请重新开始", ORANGE, hold_sec=5
+                )
+            else:
+                self._set_status("休眠已恢复 — 麦克风重新初始化", MUTED, hold_sec=3)
+            log("resume: mic reinitialized")
+
+        self.root.after(2000, reinit)
 
     def _register_raise_handler(self):
         def raise_window(*_):
