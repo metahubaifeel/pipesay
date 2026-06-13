@@ -5,6 +5,12 @@ PIDFILE="$RUNTIME/pipesay.pid"
 LAUNCH_STAMP="$RUNTIME/pipesay.launch"
 FORCE=0
 
+_raise_window() {
+  if command -v wmctrl >/dev/null 2>&1; then
+    wmctrl -a "PipeSay" 2>/dev/null || true
+  fi
+}
+
 [[ "${1:-}" == "--restart" ]] && FORCE=1 && shift
 [[ "${PIPSAY_RESTART:-}" == "1" ]] && FORCE=1
 
@@ -28,6 +34,7 @@ if [[ -f "$PIDFILE" ]]; then
         rm -f "$PIDFILE"
       else
         kill -USR1 "$old_pid" 2>/dev/null
+        _raise_window
         exit 0
       fi
     else
