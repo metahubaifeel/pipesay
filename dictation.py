@@ -585,6 +585,7 @@ class DictationApp:
         self._mic_warmup_until = 0.0
         self._mic_stuck_streak = 0
         self._mic_stuck_active = False
+        self._mic_recover_attempts = 0
         self._user_status_until = 0.0
         self._mic_restarting = False
 
@@ -814,6 +815,22 @@ class DictationApp:
         if self.recording:
             self._set_status("麦克风卡死已重连 — 请继续说话", ORANGE, hold_sec=3)
 
+    def _fail_mic_stuck(self):
+        if not self.recording:
+            return
+        log("mic stuck -32768, abort recording")
+        self.recording = False
+        self.record_btn.config(text="开始录音", bg=BTN_BG)
+        self._abort_session()
+        self._hide_live_panel()
+        self._mic_recover_attempts = 0
+        self._mic_stuck_streak = 0
+        self.status_label.config(
+            text="麦克风卡死 — 请运行: systemctl --user restart pipewire pipewire-pulse  然后重启 PipeSay",
+            fg="#ff6b6b",
+        )
+        self.root.after(300, self._start_mic_monitor)
+
     def _start_mic_monitor(self):
         self._mic_restarting = True
         self._mic_broken = False
@@ -843,10 +860,20 @@ class DictationApp:
                     self._mic_stuck_streak += 1
                     if self._mic_stuck_streak >= 4 and not self._mic_restarting:
                         self._mic_stuck_streak = 0
-                        try:
-                            self.root.after(0, self._recover_mic_stream)
-                        except Exception:
-                            pass
+                        if (
+                            time.time() - self.record_started_at < 4.0
+                            or self._mic_recover_attempts >= 2
+                        ):
+                            try:
+                                self.root.after(0, self._fail_mic_stuck)
+                            except Exception:
+                                pass
+                        else:
+                            self._mic_recover_attempts += 1
+                            try:
+                                self.root.after(0, self._recover_mic_stream)
+                            except Exception:
+                                pass
             else:
                 self._mic_stuck_streak = 0
                 meter = peak if self.recording else meter_peak(indata)
@@ -1374,6 +1401,7 @@ class DictationApp:
         self._mic_broken_streak = 0
         self._mic_stuck_streak = 0
         self._mic_stuck_active = False
+        self._mic_recover_attempts = 0
         prepare_microphone()
         if self._mic_candidate_idx != 0:
             self._mic_candidate_idx = 0
@@ -1451,6 +1479,16 @@ class DictationApp:
         session.flush_pending()
         log("rt audio flushed")
 
+        def ui():
+            if not self.recording:
+                return
+            if self._mic_stuck_active:
+                self.status_label.config(text="麦克风卡死 — 无法转写", fg=ORANGE)
+            else:
+                self.status_label.config(text="正在录音… 实时转写中", fg="#ff6b6b")
+
+        self.root.after(0, ui)
+
     def _stop_recording(self):
         self.recording = False
         self.record_btn.config(text="开始录音", bg=BTN_BG)
@@ -1473,7 +1511,8 @@ class DictationApp:
             else:
                 msg = f"没收到有效声音 (peak={peak:.3f})，请检查麦克风权限/静音"
             self.status_label.config(text=msg, fg="#ff6b6b")
-            save_debug_wav(raw, self.capture_rate, "silent")
+            if raw is not None:
+                save_debug_wav(raw, self.capture_rate, "silent")
             self.root.after(200, self._start_mic_monitor)
             return
 
