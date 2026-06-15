@@ -110,7 +110,7 @@ Lab and stable use separate PID files and logs—you can run both at once.
 
 ### Known limitations
 
-- **Mic routing** was validated on some ACP devices (e.g. `hw_acp63`); other machines use PipeWire’s default device—behavior varies by hardware.
+- **Mic routing** follows PipeWire’s default input by default; use **Choose…** in the UI to pin a device (saved in `~/.config/pipesay/mic.json`). **Auto-stops recording** on lid-close/sleep and network drop, and tries restarting PipeWire to recover the mic; a full reboot may still be needed in rare ACP driver cases.
 - **On recognition failure**, debug WAVs may be written under `~/.local/share/pipesay/` (local only—mind privacy).
 - **Real-time STT depends on Soniox cloud**; local Whisper is an optional offline add-on, not real-time, and loads slowly the first time.
 - Do not run `revert-ui.sh` by mistake—it rolls `dictation.py` back to a very old `v1.1-stable` UI.

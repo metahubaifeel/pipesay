@@ -110,7 +110,7 @@ Lab 与稳定版 PID / 日志独立，可同时运行。
 
 ### 已知限制
 
-- **麦克风路由** 在部分 ACP 声卡（如 `hw_acp63`）上做过验证；其他机器走 PipeWire 默认设备，表现因硬件而异。
+- **麦克风路由** 默认跟随 PipeWire 系统默认输入；需要时可点界面「选择…」固定设备（保存在 `~/.config/pipesay/mic.json`）。合盖/断网时会**自动停录**并尝试重启 PipeWire 恢复麦克风；部分 ACP 声卡极端情况仍可能需要重启电脑。
 - **识别失败时** 可能将调试 WAV 写入 `~/.local/share/pipesay/`（仅本地，注意隐私）。
 - **实时转写依赖 Soniox 云端**；本地 Whisper 为可选离线补充，首次加载较慢。
 - 勿误跑 `revert-ui.sh`：会把 `dictation.py` 回退到很旧的 `v1.1-stable` UI。
