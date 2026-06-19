@@ -38,8 +38,8 @@ MIC_CONFIG_FILE = os.path.join(CONFIG_DIR, "mic.json")
 LOG_FILE = os.path.join(LOG_DIR, "dictation.log")
 PID_BASENAME = "pipesay-lab.pid"
 KNOWN_MIC_LABELS = (
-    ("hw_acp63__source", 48000, "内置数字麦克风 (acp63)"),
     ("hw_Generic_1__source", 44100, "模拟麦克风 (ALC257)"),
+    ("hw_acp63__source", 48000, "内置数字麦克风 (acp63)"),
 )
 RAISE_SIGNAL = signal.SIGUSR1
 
@@ -177,6 +177,10 @@ def soniox_error_is_disconnect(message: str) -> bool:
             "decode timeout",
             "balance exhausted",
             "invalid api",
+            "no close frame",
+            "503",
+            "cannot continue request",
+            "code 19",
         )
     ):
         return False
@@ -196,14 +200,30 @@ def soniox_error_is_disconnect(message: str) -> bool:
     ) or "timed out" in low
 
 
+def soniox_error_needs_session_restart(message: str) -> bool:
+    low = (message or "").lower()
+    return (
+        "503" in low
+        or "cannot continue request" in low
+        or "code 19" in low
+        or "no close frame" in low
+    )
+
+
 def friendly_soniox_error(message: str) -> str:
     msg = (message or "").lower()
+    if "503" in msg or "cannot continue request" in msg:
+        return "Soniox 服务繁忙 — 正在自动重连"
+    if "no close frame" in msg:
+        return "云端连接抖动 — 正在自动重连"
     if "balance exhausted" in msg:
         return "Soniox 余额不足，请登录 soniox.com 充值"
     if "invalid" in msg and "api" in msg:
         return "Soniox API Key 无效，请点「API Key」检查"
     if "408" in msg or "timeout" in msg or "decode" in msg:
         return "麦克风无有效音频（可能卡死 -32768，请停录后重试或重启 PipeWire）"
+    if len(message or "") > 60:
+        return "Soniox 服务异常 — 请停录后重试"
     return message or "未知错误"
 
 
@@ -764,9 +784,12 @@ class DictationApp:
         self._idle_stuck_recover_at = 0.0
         self._sleep_listener_started = False
         self._mic_hard_recover_at = 0.0
+        self._awaiting_wake = False
         self._connect_epoch = 0
         self._last_record_stop_at = 0.0
         self._rt_connecting = False
+        self._last_rt_reconnect_at = 0.0
+        self._mic_exhausted = False
 
         self._setup_styles()
         self._build_ui()
@@ -820,15 +843,36 @@ class DictationApp:
         self._mic_hard_recover_at = now
         log(f"hard mic recover: {reason}")
         self._release_mic_stream()
-        self._reset_pipewire_audio()
-        if self._mic_pinned_source is not None:
-            prepare_microphone(pinned_source=self._mic_pinned_source)
-        else:
-            prepare_microphone()
-        self._mic_warmup_until = time.time() + 3.0
-        self._mic_candidate_idx = 0
-        self._idle_stuck_streak = 0
-        self._start_mic_monitor()
+        self.status_label.config(text="正在重启 PipeWire…", fg=ORANGE)
+
+        def work():
+            ok = self._reset_pipewire_audio()
+
+            def finish():
+                if self._shutting_down or self.recording:
+                    return
+                if self._mic_pinned_source is not None:
+                    prepare_microphone(pinned_source=self._mic_pinned_source)
+                else:
+                    prepare_microphone()
+                self._mic_warmup_until = time.time() + 3.0
+                self._mic_candidate_idx = 0
+                self._idle_stuck_streak = 0
+                self._mic_stuck_active = False
+                self._start_mic_monitor()
+                if ok:
+                    self._set_status("PipeWire 已重启 — 麦克风就绪", GREEN, hold_sec=4)
+                    self.root.after(4500, self._set_idle_status)
+                else:
+                    self._set_status(
+                        "PipeWire 重启失败 — 请重开 PipeSay 或重启电脑",
+                        "#ff6b6b",
+                        hold_sec=8,
+                    )
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _start_sleep_listener(self):
         if self._sleep_listener_started:
@@ -839,6 +883,12 @@ class DictationApp:
             def on_sleep_signal():
                 try:
                     self.root.after(0, self._on_prepare_for_sleep)
+                except Exception:
+                    pass
+
+            def on_wake_signal():
+                try:
+                    self.root.after(0, self._on_wake_from_sleep)
                 except Exception:
                     pass
 
@@ -863,8 +913,12 @@ class DictationApp:
                     )
                     for line in proc.stdout:
                         low = line.lower()
-                        if "prepareforsleep" in low.replace("_", "") and "true" in low:
-                            on_sleep_signal()
+                        key = low.replace("_", "")
+                        if "prepareforsleep" in key:
+                            if "true" in low:
+                                on_sleep_signal()
+                            elif "false" in low:
+                                on_wake_signal()
                     return
                 except FileNotFoundError:
                     continue
@@ -877,10 +931,20 @@ class DictationApp:
 
     def _on_prepare_for_sleep(self):
         log("PrepareForSleep — release mic before suspend")
+        self._awaiting_wake = True
         if self.recording:
             self._emergency_stop_recording("合盖休眠 — 已自动停录")
         else:
             self._release_mic_stream()
+
+    def _on_wake_from_sleep(self):
+        if not self._awaiting_wake and not self._suspended:
+            return
+        log("PrepareForSleep false — wake from suspend")
+        self._awaiting_wake = False
+        self._suspended = True
+        self._last_tick = time.time()
+        self._on_resume()
 
     def _cancel_record_watchdog(self):
         tid = self._record_watchdog_id
@@ -920,7 +984,6 @@ class DictationApp:
         self._hide_live_panel()
         self.local_chunks = []
         self.peak_level = 0.0
-        self._release_mic_stream()
         if partial:
             self._commit_result_text(partial)
             if self.auto_copy.get():
@@ -932,7 +995,7 @@ class DictationApp:
                 self._set_status(f"{reason} — 已保存 {len(partial)} 字", GREEN, hold_sec=5)
         else:
             self._set_status(f"{reason}", ORANGE, hold_sec=4)
-        self.root.after(800, lambda: self._hard_recover_mic(reason))
+        self.root.after(3000, self._set_idle_status)
 
     def _check_suspend(self):
         if self._shutting_down:
@@ -1177,10 +1240,14 @@ class DictationApp:
         if now - self._mic_rotate_at < 5.0:
             return
         self._mic_rotate_at = now
-        self._mic_candidate_idx += 1
         candidates = list_mic_candidates()
-        if self._mic_candidate_idx >= len(candidates):
-            self._mic_candidate_idx = 0
+        next_idx = self._mic_candidate_idx + 1
+        if next_idx >= len(candidates):
+            next_idx = 0
+            self._mic_exhausted = True
+            log("all mic candidates exhausted")
+            self._hard_recover_mic("all mic candidates exhausted")
+        self._mic_candidate_idx = next_idx
         log(f"rotate mic candidate -> {self._mic_candidate_idx}")
         prepare_microphone(candidate_idx=self._mic_candidate_idx)
         self._start_mic_monitor()
@@ -1292,6 +1359,7 @@ class DictationApp:
             elif not broken:
                 self._mic_broken = False
                 self._mic_broken_streak = 0
+                self._mic_exhausted = False
             elif warming_up or self.recording:
                 if not stuck_min:
                     self._mic_broken = False
@@ -1349,13 +1417,14 @@ class DictationApp:
             self.level_bar["value"] = 0
             self.level_label.config(text="异常", fg=ORANGE)
             if not self.recording and time.time() > self._user_status_until:
-                hint = "麦克风数据异常"
-                if self._mic_pinned_source is not None:
-                    hint += " — 固定设备异常，请换设备或改回「跟随系统」"
+                if self._mic_exhausted:
+                    hint = "麦克风硬件卡死 — 请重启电脑（合盖休眠后需冷启动）"
+                elif self._mic_pinned_source is not None:
+                    hint = "麦克风数据异常 — 固定设备异常，请换设备或改回「跟随系统」"
                 elif self._mic_candidate_idx != 0:
-                    hint += " — 已切到备用麦，建议重启应用恢复"
+                    hint = "麦克风数据异常 — 正在尝试备用麦克风…"
                 else:
-                    hint += " — 合盖/长时间录音后常见，请重启 PipeSay 或 PipeWire"
+                    hint = "麦克风数据异常 — 正在检测并切换设备…"
                 self.status_label.config(text=hint, fg=ORANGE)
             return
         pct = min(100, int(peak * 100))
@@ -1990,6 +2059,32 @@ class DictationApp:
                 target=self._connect_rt, args=(rt_token,), daemon=True
             ).start()
 
+    def _reconnect_rt_during_recording(self, rt_token):
+        if not self.recording or rt_token != self._active_rt_token:
+            return
+        now = time.time()
+        if now - self._last_rt_reconnect_at < 4.0:
+            return
+        self._last_rt_reconnect_at = now
+        log(f"rt session restart token={rt_token}")
+        if self.soniox_session:
+            self.soniox_session.abort()
+        self._connect_epoch += 1
+        self.soniox_session = SonioxRealtimeSession(
+            get_soniox_key(),
+            on_text=lambda t, p, n, tok=rt_token: self._on_live_text(tok, t, p, n),
+            on_error=lambda m, tok=rt_token: self._on_soniox_error(tok, m),
+            on_finished=lambda t, tok=rt_token: self._on_soniox_finished(tok, t),
+            on_ready=self._on_rt_ready,
+        )
+        self._rt_connecting = True
+        self._set_recording_status_if_active(
+            rt_token, "Soniox 繁忙 — 正在自动重连…", ORANGE
+        )
+        threading.Thread(
+            target=self._connect_rt, args=(rt_token,), daemon=True
+        ).start()
+
     def _set_recording_status_if_active(self, rt_token, text, fg="#ff6b6b"):
         if rt_token != self._active_rt_token or not self.recording:
             return False
@@ -2269,13 +2364,15 @@ class DictationApp:
                 and self.recording
                 and rt_token != self._finalizing_rt_token
             ):
-                if soniox_error_is_disconnect(message):
+                if soniox_error_needs_session_restart(message):
+                    self._reconnect_rt_during_recording(rt_token)
+                elif soniox_error_is_disconnect(message):
                     self._emergency_stop_recording(
                         "云端连接断开（休眠/网络）", save_partial=True
                     )
                 else:
                     self.status_label.config(
-                        text=f"云端异常: {friendly_soniox_error(message)} — 可继续说话或停录",
+                        text=f"{friendly_soniox_error(message)} — 可继续说话或停录",
                         fg=ORANGE,
                     )
                 return

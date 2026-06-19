@@ -63,6 +63,15 @@ git checkout experiment/drag-drop   # 或标签 v1.4-lab
 
 Lab 与稳定版 PID / 日志独立，可同时运行。
 
+**Lab 近期亮点：**
+
+- **⋮⋮ 拖动** 实时转写 → **Cursor 聊天框**、浏览器、Discord（UTF-8，中文不乱码）
+- 拖的同时自动复制；浏览器/Cursor 若异常，**点一下手柄 + Ctrl+V** 即可
+- 合盖唤醒自动恢复麦克风；Soniox 503 / 断线自动重连
+- 麦克风 `-32768` 卡死时尝试 PipeWire 重启（严重时仍需重启电脑）
+
+详见 [README-LAB.md](README-LAB.md)。
+
 ---
 
 ## 分支与标签
